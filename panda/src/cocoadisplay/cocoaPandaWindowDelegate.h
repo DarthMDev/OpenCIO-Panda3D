@@ -29,7 +29,9 @@ class CocoaGraphicsWindow;
 - (void)windowDidDeminiaturize:(NSNotification *)notification;
 - (void)windowDidBecomeKey:(NSNotification *)notification;
 - (void)windowDidResignKey:(NSNotification *)notification;
+- (void)windowDidChangeBackingProperties:(NSNotification *)notification;
 - (BOOL)windowShouldClose:(id)sender;
+- (void)windowWillClose:(id)sender;
 
 // TODO: handle fullscreen on Lion.
 

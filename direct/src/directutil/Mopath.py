@@ -1,8 +1,21 @@
 from direct.showbase.DirectObject import DirectObject
 from direct.showbase.MessengerGlobal import messenger
-from direct.directtools.DirectGeometry import *
+from direct.directtools.DirectUtil import CLAMP
+from direct.task.TaskManagerGlobal import taskMgr
 
-from panda3d.core import NodePath, LineSegs
+from panda3d.core import (
+    PCTHPR,
+    PCTNONE,
+    PCTT,
+    PCTXYZ,
+    ClockObject,
+    LineSegs,
+    NodePath,
+    ParametricCurve,
+    Point3,
+    Vec3,
+)
+
 
 class Mopath(DirectObject):
 
@@ -10,7 +23,7 @@ class Mopath(DirectObject):
 
     def __init__(self, name = None, fluid = 1, objectToLoad = None, upVectorNodePath = None, reverseUpVector = False):
         if name is None:
-            name = 'mopath%d' % self.nameIndex
+            name = f'mopath{self.nameIndex}'
             self.nameIndex = self.nameIndex + 1
         self.name = name
         self.fluid = fluid
@@ -25,12 +38,12 @@ class Mopath(DirectObject):
         self.upVectorNodePath = upVectorNodePath
         self.reverseUpVector = reverseUpVector
         self.reset()
-        if isinstance( objectToLoad, NodePath ):
-            self.loadNodePath( objectToLoad )
-        elif isinstance( objectToLoad, str ):
-            self.loadFile( objectToLoad )
+        if isinstance(objectToLoad, NodePath):
+            self.loadNodePath(objectToLoad)
+        elif isinstance(objectToLoad, str):
+            self.loadFile(objectToLoad)
         elif objectToLoad is not None:
-            print("Mopath: Unable to load object '%s', objectToLoad must be a file name string or a NodePath" % objectToLoad)
+            print(f"Mopath: Unable to load object '{objectToLoad}', objectToLoad must be a file name string or a NodePath")
 
     def getMaxT(self):
         return self.maxT * self.timeScale
@@ -48,7 +61,7 @@ class Mopath(DirectObject):
             self.reset()
 
         self.__extractCurves(nodePath)
-        if self.tNurbsCurve != []:
+        if self.tNurbsCurve:
             self.maxT = self.tNurbsCurve[-1].getMaxT()
         elif self.xyzNurbsCurve is not None:
             self.maxT = self.xyzNurbsCurve.getMaxT()
@@ -56,7 +69,6 @@ class Mopath(DirectObject):
             self.maxT = self.hprNurbsCurve.getMaxT()
         else:
             print('Mopath: no valid curves in nodePath: %s' % nodePath)
-
 
     def reset(self):
         self.maxT = 0.0
@@ -152,13 +164,13 @@ class Mopath(DirectObject):
         self.stop()
         t = taskMgr.add(self.__playTask, self.name + '-play')
         t.currentTime = time
-        t.lastTime = globalClock.getFrameTime()
+        t.lastTime = ClockObject.getGlobalClock().getFrameTime()
 
     def stop(self):
         taskMgr.remove(self.name + '-play')
 
     def __playTask(self, task):
-        time = globalClock.getFrameTime()
+        time = ClockObject.getGlobalClock().getFrameTime()
         dTime = time - task.lastTime
         task.lastTime = time
         if self.loop:

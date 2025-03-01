@@ -61,8 +61,7 @@ This package contains the SDK for development with Panda3D.
 /usr/%_lib/panda3d
 /usr/include/panda3d
 """
-INSTALLER_SPEC_FILE_PVIEW = """\
-/usr/share/applications/pview.desktop
+INSTALLER_SPEC_FILE_MIME = """\
 /usr/share/mime-info/panda3d.mime
 /usr/share/mime-info/panda3d.keys
 /usr/share/mime/packages/panda3d.xml
@@ -125,6 +124,8 @@ if (( ${version_info[0]} == 10 && ${version_info[1]} < 15 )); then
 MACOS_SCRIPT_POSTFIX = """\
 fi
 """
+
+EXCLUDE_BINARIES = ["deploy-stub", "deploy-stubw", "run_tests"]
 
 
 def MakeInstallerNSIS(version, file, title, installdir, compressor="lzma", **kwargs):
@@ -189,52 +190,80 @@ def MakeInstallerNSIS(version, file, title, installdir, compressor="lzma", **kwa
     oscmd(cmd)
 
 
-def MakeDebugSymbolArchive(zipname, dirname):
-    outputdir = GetOutputDir()
-
+def MakeDebugSymbolZipArchive(zipname):
     import zipfile
 
-    zip = zipfile.ZipFile(zipname, 'w', zipfile.ZIP_DEFLATED)
+    outputdir = GetOutputDir()
+    zip = zipfile.ZipFile(zipname + '.zip', 'w', zipfile.ZIP_DEFLATED)
 
     for fn in glob.glob(os.path.join(outputdir, 'bin', '*.pdb')):
-        zip.write(fn, dirname + '/bin/' + os.path.basename(fn))
+        zip.write(fn, 'bin/' + os.path.basename(fn))
 
     for fn in glob.glob(os.path.join(outputdir, 'panda3d', '*.pdb')):
-        zip.write(fn, dirname + '/panda3d/' + os.path.basename(fn))
+        zip.write(fn, 'panda3d/' + os.path.basename(fn))
 
     for fn in glob.glob(os.path.join(outputdir, 'plugins', '*.pdb')):
-        zip.write(fn, dirname + '/plugins/' + os.path.basename(fn))
+        zip.write(fn, 'plugins/' + os.path.basename(fn))
 
     for fn in glob.glob(os.path.join(outputdir, 'python', '*.pdb')):
-        zip.write(fn, dirname + '/python/' + os.path.basename(fn))
+        zip.write(fn, 'python/' + os.path.basename(fn))
 
     for fn in glob.glob(os.path.join(outputdir, 'python', 'DLLs', '*.pdb')):
-        zip.write(fn, dirname + '/python/DLLs/' + os.path.basename(fn))
+        zip.write(fn, 'python/DLLs/' + os.path.basename(fn))
 
     zip.close()
 
 
-def MakeInstallerLinux(version, debversion=None, rpmrelease=1,
+def MakeDebugSymbolSevenZipArchive(zipname, compressor):
+    zipname += '.7z'
+    flags = ['-t7z', '-y']
+
+    if compressor == 'zlib':
+        # This will still build an LZMA2 archive by default,
+        # but will complete significantly faster.
+        flags.extend(['-mx=3'])
+
+    # Remove the old archive before proceeding.
+    if os.path.exists(zipname):
+        os.remove(zipname)
+
+    outputdir = GetOutputDir()
+
+    # We'll be creating the archive inside the output
+    # directory, so we need the relative path to the archive
+    zipname = os.path.relpath(zipname, outputdir)
+
+    # Create a 7-zip archive, including all *.pdb files
+    # that are not in the tmp folder
+    cmd = [GetSevenZip(), 'a']
+    cmd.extend(flags)
+    cmd.extend(['-ir!*.pdb', '-x!' + os.path.join('tmp', '*'), zipname])
+
+    subprocess.call(cmd, stdout=subprocess.DEVNULL, cwd=outputdir)
+
+
+def MakeDebugSymbolArchive(zipname, compressor):
+    if HasSevenZip():
+        MakeDebugSymbolSevenZipArchive(zipname, compressor)
+    else:
+        MakeDebugSymbolZipArchive(zipname)
+
+
+def MakeInstallerLinux(version, debversion=None, rpmversion=None, rpmrelease=1,
                        python_versions=[], **kwargs):
     outputdir = GetOutputDir()
 
-    # We pack the default Python 3 version that ships with Ubuntu.
-    python3_ver = None
+    # Only pack the versions of Python included with this Ubuntu version.
     install_python_versions = []
-
-    # What's the system version of Python 3?
-    oscmd('python3 -V > "%s/tmp/python3_version.txt"' % (outputdir))
-    sys_python3_ver = '.'.join(ReadFile(outputdir + "/tmp/python3_version.txt").strip().split(' ')[1].split('.')[:2])
-
-    # Check that we built with support for it.
     for version_info in python_versions:
-        if version_info["version"] == sys_python3_ver:
-            python3_ver = sys_python3_ver
+        if os.path.isdir("/usr/lib/python" + version_info["version"]):
             install_python_versions.append(version_info)
 
     major_version = '.'.join(version.split('.')[:2])
     if not debversion:
         debversion = version
+    if not rpmversion:
+        rpmversion = version
 
     # Clean and set up a directory to install Panda3D into
     oscmd("rm -rf targetroot data.tar.gz control.tar.gz panda3d.spec")
@@ -314,9 +343,13 @@ def MakeInstallerLinux(version, debversion=None, rpmrelease=1,
         recommends = ReadFile("targetroot/debian/substvars_rec").replace("shlibs:Depends=", "").strip()
         provides = "panda3d"
 
-        if python3_ver:
-            depends += ", python%s" % (python3_ver)
-            recommends += ", python-pmw, python3-tk (>= %s)" % (python3_ver)
+        # Require at least one of the Python versions we built for.
+        if install_python_versions:
+            depends += ", " + " | ".join("python" + version_info["version"] for version_info in install_python_versions)
+
+            # But recommend the system version of Python 3.
+            recommends += ", python3"
+            recommends += ", python3-tk"
             provides += ", python3-panda3d"
 
         if not PkgSkip("NVIDIACG"):
@@ -333,7 +366,7 @@ def MakeInstallerLinux(version, debversion=None, rpmrelease=1,
         oscmd("chmod -R 755 targetroot/DEBIAN")
         oscmd("chmod 644 targetroot/DEBIAN/control targetroot/DEBIAN/md5sums")
         oscmd("chmod 644 targetroot/DEBIAN/conffiles targetroot/DEBIAN/symbols")
-        oscmd("fakeroot dpkg-deb -b targetroot %s_%s_%s.deb" % (pkg_name, pkg_version, pkg_arch))
+        oscmd("fakeroot dpkg-deb -Zxz -b targetroot %s_%s_%s.deb" % (pkg_name, pkg_version, pkg_arch))
 
     elif rpmbuild_present:
         # Invoke installpanda.py to install it into a temporary dir
@@ -352,9 +385,15 @@ def MakeInstallerLinux(version, debversion=None, rpmrelease=1,
 
         txt = INSTALLER_SPEC_FILE[1:]
 
-        # Add the MIME associations if we have pview
-        if not PkgSkip("PVIEW"):
-            txt += INSTALLER_SPEC_FILE_PVIEW
+        # Add the MIME associations if we have pview or pstats
+        if not PkgSkip("PVIEW") or not PkgSkip("PSTATS"):
+            txt += INSTALLER_SPEC_FILE_MIME
+
+            if not PkgSkip("PVIEW"):
+                txt += "/usr/share/applications/pview.desktop\n"
+
+            if not PkgSkip("PSTATS"):
+                txt += "/usr/share/applications/pstats.desktop\n"
 
         # Add the platform-specific Python directories.
         dirs = set()
@@ -367,17 +406,17 @@ def MakeInstallerLinux(version, debversion=None, rpmrelease=1,
 
         # Add the binaries in /usr/bin explicitly to the spec file
         for base in os.listdir(outputdir + "/bin"):
-            if not base.startswith("deploy-stub"):
+            if base not in EXCLUDE_BINARIES:
                 txt += "/usr/bin/%s\n" % (base)
 
         # Write out the spec file.
-        txt = txt.replace("VERSION", version)
+        txt = txt.replace("VERSION", rpmversion)
         txt = txt.replace("RPMRELEASE", str(rpmrelease))
         txt = txt.replace("PANDASOURCE", pandasource)
         WriteFile("panda3d.spec", txt)
 
         oscmd("fakeroot rpmbuild --define '_rpmdir "+pandasource+"' --buildroot '"+os.path.abspath("targetroot")+"' -bb panda3d.spec")
-        oscmd("mv "+arch+"/panda3d-"+version+"-"+rpmrelease+"."+arch+".rpm .")
+        oscmd("mv "+arch+"/panda3d-"+rpmversion+"-"+rpmrelease+"."+arch+".rpm .")
         oscmd("rm -rf "+arch, True)
 
     else:
@@ -433,7 +472,7 @@ def MakeInstallerOSX(version, python_versions=[], installdir=None, **kwargs):
     oscmd("install -m 0644 doc/man/*.1 dstroot/tools/usr/local/share/man/man1/")
 
     for base in os.listdir(outputdir + "/bin"):
-        if not base.startswith("deploy-stub"):
+        if base not in EXCLUDE_BINARIES:
             binname = ("dstroot/tools/%s/bin/" % installdir) + base
             # OSX needs the -R argument to copy symbolic links correctly, it doesn't have -d. How weird.
             oscmd("cp -R " + outputdir + "/bin/" + base + " " + binname)
@@ -713,7 +752,7 @@ def MakeInstallerOSX(version, python_versions=[], installdir=None, **kwargs):
     dist.write('</installer-script>\n')
     dist.close()
 
-    oscmd('hdiutil create Panda3D-rw.dmg -volname "Panda3D SDK %s" -srcfolder dstroot/Panda3D' % (version))
+    oscmd('hdiutil create Panda3D-rw.dmg -fs HFS+ -volname "Panda3D SDK %s" -srcfolder dstroot/Panda3D' % (version))
     oscmd('hdiutil convert Panda3D-rw.dmg -format UDBZ -o %s' % (dmg_name))
     oscmd('rm -f Panda3D-rw.dmg')
 
@@ -758,7 +797,7 @@ def MakeInstallerFreeBSD(version, python_versions=[], **kwargs):
         oscmd("rm -f %s/tmp/python_dep" % outputdir)
 
         if "PYTHONVERSION" in SDK:
-            pyver_nodot = SDK["PYTHONVERSION"][6:].rstrip('dmu').replace('.', '')
+            pyver_nodot = SDK["PYTHONVERSION"][6:].rstrip('dmut').replace('.', '')
         else:
             pyver_nodot = "%d%d" % (sys.version_info[:2])
 
@@ -794,16 +833,8 @@ def MakeInstallerAndroid(version, **kwargs):
     if os.path.exists(apk_unsigned):
         os.unlink(apk_unsigned)
 
-    # Compile the Java classes into a Dalvik executable.
-    dx_cmd = "dx --dex --output=apkroot/classes.dex "
-    if GetOptimize() <= 2:
-        dx_cmd += "--debug "
-    if GetVerbose():
-        dx_cmd += "--verbose "
-    if "ANDROID_API" in SDK:
-        dx_cmd += "--min-sdk-version=%d " % (SDK["ANDROID_API"])
-    dx_cmd += os.path.join(outputdir, "classes")
-    oscmd(dx_cmd)
+    # Copy the compiled Java classes.
+    oscmd("cp %s apkroot/classes.dex" % (os.path.join(outputdir, "classes.dex")))
 
     # Copy the libraries one by one.  In case of library dependencies, strip
     # off any suffix (eg. libfile.so.1.0), as Android does not support them.
@@ -835,7 +866,7 @@ def MakeInstallerAndroid(version, **kwargs):
         shutil.copy(source, target)
 
         # Walk through the library dependencies.
-        handle = subprocess.Popen(['readelf', '--dynamic', target], stdout=subprocess.PIPE)
+        handle = subprocess.Popen(['llvm-readelf', '--dynamic', target], stdout=subprocess.PIPE)
         for line in handle.communicate()[0].splitlines():
             # The line will look something like:
             # 0x0000000000000001 (NEEDED)             Shared library: [libpanda.so]
@@ -887,8 +918,12 @@ def MakeInstallerAndroid(version, **kwargs):
                 copy_library(source, "libpy.panda3d.{}.so".format(modname))
 
         # Same for standard Python modules.
-        import _ctypes
-        source_dir = os.path.dirname(_ctypes.__file__)
+        if CrossCompiling():
+            source_dir = os.path.join(GetThirdpartyDir(), "python", "lib", SDK["PYTHONVERSION"], "lib-dynload")
+        else:
+            import _ctypes
+            source_dir = os.path.dirname(_ctypes.__file__)
+
         for base in os.listdir(source_dir):
             if not base.endswith('.so'):
                 continue
@@ -914,7 +949,7 @@ def MakeInstallerAndroid(version, **kwargs):
                     shutil.copy(os.path.join(source_dir, base), target)
 
     # Copy the Python standard library to the .apk as well.
-    from distutils.sysconfig import get_python_lib
+    from locations import get_python_lib
     stdlib_source = get_python_lib(False, True)
     stdlib_target = os.path.join("apkroot", "lib", "python{0}.{1}".format(*sys.version_info))
     copy_python_tree(stdlib_source, stdlib_target)
@@ -974,6 +1009,7 @@ def MakeInstallerAndroid(version, **kwargs):
 
 def MakeInstaller(version, **kwargs):
     target = GetTarget()
+
     if target == 'windows':
         dir = kwargs.pop('installdir', None)
         if dir is None:
@@ -996,8 +1032,10 @@ def MakeInstaller(version, **kwargs):
         if GetTargetArch() == 'x64':
             fn += '-x64'
 
+        compressor = kwargs.get('compressor')
+
         MakeInstallerNSIS(version, fn + '.exe', title, dir, **kwargs)
-        MakeDebugSymbolArchive(fn + '-pdb.zip', dir)
+        MakeDebugSymbolArchive(fn + '-pdb', compressor)
     elif target == 'linux':
         MakeInstallerLinux(version, **kwargs)
     elif target == 'darwin':
@@ -1026,6 +1064,13 @@ if __name__ == "__main__":
         '--debversion',
         dest='debversion',
         help='Version number for .deb file',
+        default=None,
+    )
+    parser.add_option(
+        '',
+        '--rpmversion',
+        dest='rpmversion',
+        help='Version number for .rpm file',
         default=None,
     )
     parser.add_option(
@@ -1097,6 +1142,7 @@ if __name__ == "__main__":
         optimize=GetOptimize(),
         compressor=options.compressor,
         debversion=options.debversion,
+        rpmversion=options.rpmversion,
         rpmrelease=options.rpmrelease,
         python_versions=ReadPythonVersionInfoFile(),
         installdir=options.installdir,

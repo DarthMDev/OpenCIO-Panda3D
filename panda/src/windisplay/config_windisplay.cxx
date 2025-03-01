@@ -27,17 +27,6 @@ ConfigureFn(config_windisplay) {
   init_libwindisplay();
 }
 
-ConfigVariableBool responsive_minimized_fullscreen_window
-("responsive-minimized-fullscreen-window",false);
-
-ConfigVariableBool hold_keys_across_windows
-("hold-keys-across-windows", false,
- PRC_DESC("Set this true to remember the current state of the keyboard while "
-          "the window focus is lost, or false to pretend the user is not "
-          "holding down any keys while the window focus is lost.  In either "
-          "case it should accurately restore the correct keyboard state when "
-          "the window focus is regained."));
-
 ConfigVariableBool do_vidmemsize_check
 ("do-vidmemsize-check", true,
  PRC_DESC("if true, use ddraw's GetAvailVidMem to fail if driver says "
@@ -48,12 +37,6 @@ ConfigVariableBool auto_cpu_data
  PRC_DESC("Set this true to automatically get the CPU data at start; false to "
           "require an explicit call to pipe->lookup_cpu_data().  Setting this "
           "true may slow down startup time by 1-2 seconds."));
-
-ConfigVariableBool ime_aware
-("ime-aware", false,
- PRC_DESC("Set this true to show ime texts on the chat panel and hide the "
-          "IME default windows. This is a mechanism to work around DX8/9 "
-          "interface."));
 
 ConfigVariableBool ime_hide
 ("ime-hide", false,
@@ -81,10 +64,6 @@ ConfigVariableBool dpi_window_resize
           "different DPI, or when the DPI setting is changed in the control "
           "panel.  Only available in Windows 8.1 and later, and requires "
           "dpi-aware to be set as well."));
-
-ConfigVariableBool swapbuffer_framelock
-("swapbuffer-framelock", false,
- PRC_DESC("Set this true to enable HW swapbuffer frame-lock on 3dlabs cards"));
 
 ConfigVariableBool paste_emit_keystrokes
 ("paste-emit-keystrokes", true,

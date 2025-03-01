@@ -14,6 +14,8 @@
 #include "pfstreamBuf.h"
 #include <assert.h>
 
+#ifndef __EMSCRIPTEN__
+
 using std::cerr;
 using std::endl;
 using std::string;
@@ -183,7 +185,7 @@ is_open() const {
  */
 bool PipeStreamBuf::
 eof_pipe() const {
-  return (_pipe == nullptr) && feof(_pipe);
+  return (_pipe == nullptr) || feof(_pipe);
 }
 
 /**
@@ -331,8 +333,9 @@ open_pipe(const string &cmd) {
 
   // Both WinExec() and CreateProcess() want a non-const char pointer.  Maybe
   // they change it, and maybe they don't.  I'm not taking chances.
-  char *cmdline = new char[cmd.length() + 1];
-  strcpy(cmdline, cmd.c_str());
+  char *cmdline = (char *)alloca(cmd.size() + 1);
+  memcpy(cmdline, cmd.data(), cmd.size());
+  cmdline[cmd.size()] = 0;
 
   // We should be using CreateProcess() instead of WinExec(), but that seems
   // to be likely to crash Win98.  WinExec() seems better behaved, and it's
@@ -344,8 +347,6 @@ open_pipe(const string &cmd) {
     close_pipe();
     // Don't return yet, since we still need to clean up.
   }
-
-  delete[] cmdline;
 
   // Now restore our own stdout, up here in the parent process.
   if (!SetStdHandle(STD_OUTPUT_HANDLE, hSaveStdout)) {
@@ -405,3 +406,5 @@ read_pipe(char *data, size_t len) {
 
 
 #endif  // WIN_PIPE_CALLS
+
+#endif  // __EMSCRIPTEN__

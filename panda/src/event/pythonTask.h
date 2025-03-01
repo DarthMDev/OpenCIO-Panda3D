@@ -89,6 +89,14 @@ PUBLISHED:
   // custom variables may be stored.
   PyObject *__dict__;
 
+public:
+  // This holds a reference to the Python wrapper corresponding to this
+  // PythonTask object.  It is necessary for this to remain consistent for
+  // the __traverse__ method to work correctly.
+  mutable PyObject *__self__ = nullptr;
+
+  virtual bool unref() const;
+
 protected:
   virtual bool cancel();
 
@@ -115,7 +123,7 @@ private:
   PyObject *_exc_traceback;
 
   PyObject *_generator;
-  PyObject *_future_done;
+  PyObject *_fut_waiter;
 
   bool _append_task;
   bool _ignore_return;

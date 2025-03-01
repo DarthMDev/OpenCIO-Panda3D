@@ -20,6 +20,7 @@
 #include "atomicAdjust.h"
 #include "numeric_types.h"
 #include "typeHandle.h"
+#include "patomic.h"
 #include <assert.h>
 
 // Though it's tempting, it doesn't seem to be possible to implement
@@ -37,7 +38,7 @@
 #endif // NDEBUG
 
 #ifdef USE_DELETEDCHAINFLAG
-enum DeletedChainFlag {
+enum DeletedChainFlag : unsigned int {
   DCF_deleted = 0xfeedba0f,
   DCF_alive = 0x12487654,
 };
@@ -56,15 +57,21 @@ enum DeletedChainFlag {
  * Use MemoryHook to get a new DeletedBufferChain of a particular size.
  */
 class EXPCL_DTOOL_DTOOLBASE DeletedBufferChain {
-protected:
-  DeletedBufferChain(size_t buffer_size);
-
 public:
+  constexpr DeletedBufferChain() = default;
+  constexpr explicit DeletedBufferChain(size_t buffer_size) noexcept;
+  INLINE DeletedBufferChain(DeletedBufferChain &&from) noexcept;
+  INLINE DeletedBufferChain(const DeletedBufferChain &copy);
+
   void *allocate(size_t size, TypeHandle type_handle);
   void deallocate(void *ptr, TypeHandle type_handle);
 
   INLINE bool validate(void *ptr);
   INLINE size_t get_buffer_size() const;
+
+  INLINE bool operator < (const DeletedBufferChain &other) const;
+
+  static DeletedBufferChain *get_deleted_chain(size_t buffer_size);
 
 private:
   class ObjectNode {
@@ -73,7 +80,7 @@ private:
     // In development mode, we piggyback this extra data.  This is maintained
     // out-of-band from the actual pointer returned, so we can safely use this
     // flag to indicate the difference between allocated and freed pointers.
-    TVOLATILE AtomicAdjust::Integer _flag;
+    patomic<DeletedChainFlag> _flag;
 #endif
 
     // This pointer sits within the buffer, in the same space referenced by
@@ -86,10 +93,10 @@ private:
   static INLINE void *node_to_buffer(ObjectNode *node);
   static INLINE ObjectNode *buffer_to_node(void *buffer);
 
-  ObjectNode *_deleted_chain;
+  ObjectNode *_deleted_chain = nullptr;
 
   MutexImpl _lock;
-  size_t _buffer_size;
+  size_t _buffer_size = 0;
 
 #ifndef USE_DELETEDCHAINFLAG
   // Without DELETEDCHAINFLAG, we don't even store the _flag member at all.

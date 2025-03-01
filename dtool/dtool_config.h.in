@@ -24,9 +24,6 @@
 /* Define to use doubles for most numbers, intead of single-precision floats. */
 #cmakedefine STDFLOAT_DOUBLE
 
-/* Define if we have built libRocket available and built with Python support. */
-#cmakedefine HAVE_ROCKET_PYTHON
-
 /* Define if we have ARToolKit available. */
 #cmakedefine HAVE_ARTOOLKIT
 
@@ -130,8 +127,12 @@
 /* Define if we want to support fixed-function OpenGL rendering. */
 #cmakedefine SUPPORT_FIXED_FUNCTION
 
-/* Define for either of the alternative malloc schemes. */
+/* Define if we have mimalloc available. */
+#cmakedefine HAVE_MIMALLOC
+
+/* Define for one of the alternative malloc schemes. */
 #cmakedefine USE_MEMORY_DLMALLOC
+#cmakedefine USE_MEMORY_MIMALLOC
 #cmakedefine USE_MEMORY_PTMALLOC2
 
 /* Define if we want to compile in support for pipelining.  */

@@ -24,11 +24,19 @@
  */
 INLINE_LINMATH std::string Extension<FLOATNAME(LVecBase2)>::
 __repr__() const {
-  std::ostringstream out;
-  out << "LVecBase2" << FLOATTOKEN << "("
-      << MAYBE_ZERO(_this->_v(0)) << ", "
-      << MAYBE_ZERO(_this->_v(1)) << ")";
-  return out.str();
+  char buf[96] = "LVecBase2";
+  char *p = buf + strlen(buf);
+  *(p++) = FLOATTOKEN;
+  *(p++) = '(';
+  FLOATTYPE_REPR(_this->_v(0), p);
+  p += strlen(p);
+  *(p++) = ',';
+  *(p++) = ' ';
+  FLOATTYPE_REPR(_this->_v(1), p);
+  p += strlen(p);
+  *(p++) = ')';
+  *p = '\0';
+  return std::string(buf, p - buf);
 }
 
 /**
@@ -175,7 +183,7 @@ __setattr__(PyObject *self, const std::string &attr_name, PyObject *assign) {
 #endif
       } else {
         PyErr_Format(PyExc_ValueError, "'%.200s' object is not iterable",
-          assign->ob_type->tp_name);
+          Py_TYPE(assign)->tp_name);
       }
       return -1;
     }
@@ -195,11 +203,96 @@ __setattr__(PyObject *self, const std::string &attr_name, PyObject *assign) {
 /**
  *
  */
-INLINE_LINMATH FLOATNAME(LVecBase2) Extension<FLOATNAME(LVecBase2)>::
-__pow__(FLOATTYPE exponent) const {
-  return FLOATNAME(LVecBase2)(
-    cpow(_this->_v(0), exponent),
-    cpow(_this->_v(1), exponent));
+INLINE_LINMATH PyObject *Extension<FLOATNAME(LVecBase2)>::
+__rmul__(PyObject *self, FLOATTYPE scalar) const {
+#ifndef CPPPARSER
+  extern struct Dtool_PyTypedObject FLOATNAME(Dtool_LVecBase2);
+#endif
+  PyObject *py_vec = PyObject_CallNoArgs((PyObject *)DtoolInstance_TYPE(self));
+  if (py_vec != nullptr) {
+    FLOATNAME(LVecBase2) *vec = (FLOATNAME(LVecBase2) *)DtoolInstance_UPCAST(py_vec, FLOATNAME(Dtool_LVecBase2));
+    nassertr(vec != nullptr, nullptr);
+
+    vec->_v(0) = _this->_v(0) * scalar;
+    vec->_v(1) = _this->_v(1) * scalar;
+  }
+  return py_vec;
+}
+
+/**
+ *
+ */
+INLINE_LINMATH PyObject *Extension<FLOATNAME(LVecBase2)>::
+__floordiv__(PyObject *self, FLOATTYPE scalar) const {
+  if (scalar == (FLOATTYPE)0) {
+    return PyErr_Format(PyExc_ZeroDivisionError, "floor division by zero");
+  }
+
+#ifndef CPPPARSER
+  extern struct Dtool_PyTypedObject FLOATNAME(Dtool_LVecBase2);
+#endif
+  PyObject *py_vec = PyObject_CallNoArgs((PyObject *)DtoolInstance_TYPE(self));
+  if (py_vec != nullptr) {
+    FLOATNAME(LVecBase2) *vec = (FLOATNAME(LVecBase2) *)DtoolInstance_UPCAST(py_vec, FLOATNAME(Dtool_LVecBase2));
+    nassertr(vec != nullptr, nullptr);
+
+#ifdef FLOATTYPE_IS_INT
+    if (scalar > 0) {
+      vec->_v(0) = (_this->_v(0) >= 0) ? _this->_v(0) / scalar : -1 - (-1 - _this->_v(0)) / scalar;
+      vec->_v(1) = (_this->_v(1) >= 0) ? _this->_v(1) / scalar : -1 - (-1 - _this->_v(1)) / scalar;
+    } else {
+      vec->_v(0) = (_this->_v(0) <= 0) ? _this->_v(0) / scalar : -1 + (1 - _this->_v(0)) / -scalar;
+      vec->_v(1) = (_this->_v(1) <= 0) ? _this->_v(1) / scalar : -1 + (1 - _this->_v(1)) / -scalar;
+    }
+#else
+    vec->_v(0) = std::floor(_this->_v(0) / scalar);
+    vec->_v(1) = std::floor(_this->_v(1) / scalar);
+#endif
+  }
+  return py_vec;
+}
+
+/**
+ *
+ */
+INLINE_LINMATH PyObject *Extension<FLOATNAME(LVecBase2)>::
+__ifloordiv__(PyObject *self, FLOATTYPE scalar) {
+  if (scalar == (FLOATTYPE)0) {
+    return PyErr_Format(PyExc_ZeroDivisionError, "floor division by zero");
+  }
+
+#ifdef FLOATTYPE_IS_INT
+  if (scalar > 0) {
+    _this->_v(0) = (_this->_v(0) >= 0) ? _this->_v(0) / scalar : -1 - (-1 - _this->_v(0)) / scalar;
+    _this->_v(1) = (_this->_v(1) >= 0) ? _this->_v(1) / scalar : -1 - (-1 - _this->_v(1)) / scalar;
+  } else {
+    _this->_v(0) = (_this->_v(0) <= 0) ? _this->_v(0) / scalar : -1 + (1 - _this->_v(0)) / -scalar;
+    _this->_v(1) = (_this->_v(1) <= 0) ? _this->_v(1) / scalar : -1 + (1 - _this->_v(1)) / -scalar;
+  }
+#else
+  _this->_v(0) = std::floor(_this->_v(0) / scalar);
+  _this->_v(1) = std::floor(_this->_v(1) / scalar);
+#endif
+  return Py_NewRef(self);
+}
+
+/**
+ *
+ */
+INLINE_LINMATH PyObject *Extension<FLOATNAME(LVecBase2)>::
+__pow__(PyObject *self, FLOATTYPE exponent) const {
+#ifndef CPPPARSER
+  extern struct Dtool_PyTypedObject FLOATNAME(Dtool_LVecBase2);
+#endif
+  PyObject *py_vec = PyObject_CallNoArgs((PyObject *)DtoolInstance_TYPE(self));
+  if (py_vec != nullptr) {
+    FLOATNAME(LVecBase2) *vec = (FLOATNAME(LVecBase2) *)DtoolInstance_UPCAST(py_vec, FLOATNAME(Dtool_LVecBase2));
+    nassertr(vec != nullptr, nullptr);
+
+    vec->_v(0) = cpow(_this->_v(0), exponent);
+    vec->_v(1) = cpow(_this->_v(1), exponent);
+  }
+  return py_vec;
 }
 
 /**
@@ -209,8 +302,7 @@ INLINE_LINMATH PyObject *Extension<FLOATNAME(LVecBase2)>::
 __ipow__(PyObject *self, FLOATTYPE exponent) {
   _this->_v(0) = cpow(_this->_v(0), exponent);
   _this->_v(1) = cpow(_this->_v(1), exponent);
-  Py_INCREF(self);
-  return self;
+  return Py_NewRef(self);
 }
 
 /**
@@ -269,6 +361,44 @@ __ceil__(PyObject *self) const {
     vec->_v(1) = std::ceil(_this->_v(1));
   }
   return py_vec;
+}
+
+/**
+ *
+ */
+INLINE_LINMATH int Extension<FLOATNAME(LVecBase2)>::
+__getbuffer__(PyObject *self, Py_buffer *view, int flags) const {
+  if ((flags & PyBUF_WRITABLE) == PyBUF_WRITABLE) {
+    PyErr_SetString(PyExc_BufferError,
+                    "Object is not writable.");
+    return -1;
+  }
+
+  static const char format[2] = {FLOATTOKEN, 0};
+  static const Py_ssize_t shape = FLOATNAME(LVecBase2)::num_components;
+
+  view->buf = (void *)_this->get_data();
+  view->obj = Py_NewRef(self);
+  view->len = 2 * sizeof(FLOATTYPE);
+  view->readonly = 1;
+  view->itemsize = sizeof(FLOATTYPE);
+  view->format = nullptr;
+  if ((flags & PyBUF_FORMAT) == PyBUF_FORMAT) {
+    view->format = (char *)format;
+  }
+  view->ndim = 1;
+  view->shape = nullptr;
+  if ((flags & PyBUF_ND) == PyBUF_ND) {
+    view->shape = (Py_ssize_t *)&shape;
+  }
+  view->strides = nullptr;
+  if ((flags & PyBUF_STRIDES) == PyBUF_STRIDES) {
+    view->strides = &view->itemsize;
+  }
+  view->suboffsets = nullptr;
+  view->internal = nullptr;
+
+  return 0;
 }
 
 #undef PYNUMBER_FLOATTYPE

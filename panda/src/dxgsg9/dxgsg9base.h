@@ -157,8 +157,8 @@ typedef enum {
     D24S8_FLAG =        FLG(20),
     D32_FLAG =          FLG(21),
     INTZ_FLAG =         FLG(22),
-    W11V11U10_FLAG =    FLG(23),
-    A2W10V10U10_FLAG =  FLG(24),
+    R32F_FLAG =         FLG(23),
+    A32B32G32R32F_FLAG =FLG(24),
     ATI1_FLAG =         FLG(25),
     ATI2_FLAG =         FLG(26),
     DXT1_FLAG =         FLG(27),
@@ -192,8 +192,8 @@ struct DXScreenData {
   HWND _window;
   HMONITOR _monitor;
   DWORD _max_available_video_memory;
-  ushort _card_id;  // adapter ID
-  ushort _depth_buffer_bitdepth;  //GetSurfaceDesc is not reliable so must store this explicitly
+  unsigned short _card_id;  // adapter ID
+  unsigned short _depth_buffer_bitdepth;  //GetSurfaceDesc is not reliable so must store this explicitly
   bool _can_direct_disable_color_writes;  // if true, don't need blending for this
   bool _is_low_memory_card;
   bool _is_tnl_device;

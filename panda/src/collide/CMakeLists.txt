@@ -12,6 +12,7 @@ set(P3COLLIDE_HEADERS
   collisionHandlerPusher.I collisionHandlerPusher.h
   collisionHandlerFluidPusher.I collisionHandlerFluidPusher.h
   collisionHandlerQueue.h
+  collisionHeightfield.I collisionHeightfield.h
   collisionInvSphere.I collisionInvSphere.h
   collisionLine.I collisionLine.h
   collisionLevelStateBase.I collisionLevelStateBase.h
@@ -46,6 +47,7 @@ set(P3COLLIDE_SOURCES
   collisionHandlerPusher.cxx
   collisionHandlerFluidPusher.cxx
   collisionHandlerQueue.cxx
+  collisionHeightfield.cxx
   collisionLevelStateBase.cxx
   collisionLevelState.cxx
   collisionInvSphere.cxx
@@ -72,6 +74,8 @@ set(P3COLLIDE_IGATEEXT
   collisionHandlerPhysical_ext.h
   collisionHandlerQueue_ext.cxx
   collisionHandlerQueue_ext.h
+  collisionNode_ext.cxx
+  collisionNode_ext.h
   collisionPolygon_ext.cxx
   collisionPolygon_ext.h
   collisionTraverser_ext.cxx

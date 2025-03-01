@@ -19,6 +19,7 @@
 #include "renderState.h"
 #include "cullFaceAttrib.h"
 #include "colorWriteAttrib.h"
+#include "lightAttrib.h"
 #include "graphicsStateGuardianBase.h"
 
 TypeHandle LightLensNode::_type_handle;
@@ -30,17 +31,21 @@ LightLensNode::
 LightLensNode(const std::string &name, Lens *lens) :
   Camera(name, lens),
   _has_specular_color(false),
-  _attrib_count(0),
-  _used_by_auto_shader(false)
+  _used_by_auto_shader(false),
+  _attrib_count(0)
 {
   set_active(false);
   _shadow_caster = false;
   _sb_size.set(512, 512);
   _sb_sort = -10;
-  // set_initial_state(RenderState::make(ShaderAttrib::make_off(), 1000));
+
   // Backface culling helps eliminating artifacts.
-  set_initial_state(RenderState::make(CullFaceAttrib::make_reverse(),
-                    ColorWriteAttrib::make(ColorWriteAttrib::C_off)));
+  static CPT(RenderState) default_initial_state =
+    RenderState::make(
+      CullFaceAttrib::make_reverse(),
+      ColorWriteAttrib::make(ColorWriteAttrib::C_off)
+    )->set_attrib(LightAttrib::make_all_off(), RenderState::get_max_priority());
+  set_initial_state(default_initial_state);
 }
 
 /**
@@ -63,12 +68,12 @@ LightLensNode::
 LightLensNode(const LightLensNode &copy) :
   Light(copy),
   Camera(copy),
-  _shadow_caster(copy._shadow_caster),
   _sb_size(copy._sb_size),
-  _sb_sort(-10),
+  _shadow_caster(copy._shadow_caster),
   _has_specular_color(copy._has_specular_color),
-  _attrib_count(0),
-  _used_by_auto_shader(false)
+  _sb_sort(-10),
+  _used_by_auto_shader(false),
+  _attrib_count(0)
 {
   if (_shadow_caster) {
     setup_shadow_map();

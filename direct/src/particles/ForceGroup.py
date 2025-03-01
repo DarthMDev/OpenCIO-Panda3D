@@ -1,10 +1,23 @@
-from panda3d.core import *
-from panda3d.physics import *
+from panda3d.core import NodePath
+from panda3d.physics import (
+    AngularForce,
+    AngularVectorForce,
+    ForceNode,
+    LinearCylinderVortexForce,
+    LinearDistanceForce,
+    LinearForce,
+    LinearFrictionForce,
+    LinearJitterForce,
+    LinearNoiseForce,
+    LinearSinkForce,
+    LinearSourceForce,
+    LinearVectorForce,
+)
 from direct.showbase.DirectObject import DirectObject
-from direct.showbase.PhysicsManagerGlobal import *
 
 from direct.directnotify import DirectNotifyGlobal
 import sys
+import warnings
 
 
 class ForceGroup(DirectObject):
@@ -61,7 +74,7 @@ class ForceGroup(DirectObject):
 
     # Get/set
     def getName(self):
-        """Deprecated: access .name directly instead."""
+        warnings.warn("Deprecated: access .name directly instead.", DeprecationWarning, stacklevel=2)
         return self.name
 
     def getNode(self):

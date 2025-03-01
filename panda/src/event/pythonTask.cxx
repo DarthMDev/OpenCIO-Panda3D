@@ -40,28 +40,28 @@ PythonTask(PyObject *func_or_coro, const std::string &name) :
   _args(nullptr),
   _upon_death(nullptr),
   _owner(nullptr),
-  _registered_to_owner(false),
   _exception(nullptr),
   _exc_value(nullptr),
   _exc_traceback(nullptr),
   _generator(nullptr),
-  _future_done(nullptr),
+  _fut_waiter(nullptr),
   _ignore_return(false),
+  _registered_to_owner(false),
   _retrieved_exception(false) {
 
   nassertv(func_or_coro != nullptr);
   if (func_or_coro == Py_None || PyCallable_Check(func_or_coro)) {
-    _function = func_or_coro;
-    Py_INCREF(_function);
-  } else if (PyCoro_CheckExact(func_or_coro)) {
+    _function = Py_NewRef(func_or_coro);
+  }
+  else if (PyCoro_CheckExact(func_or_coro)) {
     // We also allow passing in a coroutine, because why not.
-    _generator = func_or_coro;
-    Py_INCREF(_generator);
-  } else if (PyGen_CheckExact(func_or_coro)) {
+    _generator = Py_NewRef(func_or_coro);
+  }
+  else if (PyGen_CheckExact(func_or_coro)) {
     // Something emulating a coroutine.
-    _generator = func_or_coro;
-    Py_INCREF(_generator);
-  } else {
+    _generator = Py_NewRef(func_or_coro);
+  }
+  else {
     nassert_raise("Invalid function passed to PythonTask");
   }
 
@@ -84,7 +84,6 @@ PythonTask(PyObject *func_or_coro, const std::string &name) :
  */
 PythonTask::
 ~PythonTask() {
-#ifndef NDEBUG
   // If the coroutine threw an exception, and there was no opportunity to
   // handle it, let the user know.
   if (_exception != nullptr && !_retrieved_exception) {
@@ -97,11 +96,18 @@ PythonTask::
     _exc_value = nullptr;
     _exc_traceback = nullptr;
   }
-#endif
 
+  PyObject *self = __self__;
+  if (self != nullptr) {
+    PyObject_GC_UnTrack(self);
+    __self__ = nullptr;
+    Py_DECREF(self);
+  }
+
+  // All of these may have already been cleared by __clear__.
   Py_XDECREF(_function);
-  Py_DECREF(_args);
-  Py_DECREF(__dict__);
+  Py_XDECREF(_args);
+  Py_XDECREF(__dict__);
   Py_XDECREF(_exception);
   Py_XDECREF(_exc_value);
   Py_XDECREF(_exc_traceback);
@@ -116,10 +122,8 @@ PythonTask::
  */
 void PythonTask::
 set_function(PyObject *function) {
-  Py_XDECREF(_function);
+  Py_XSETREF(_function, Py_NewRef(function));
 
-  _function = function;
-  Py_INCREF(_function);
   if (_function != Py_None && !PyCallable_Check(_function)) {
     nassert_raise("Invalid function passed to PythonTask");
   }
@@ -167,18 +171,22 @@ get_args() {
     PyObject *with_task = PyTuple_New(num_args + 1);
     for (int i = 0; i < num_args; ++i) {
       PyObject *item = PyTuple_GET_ITEM(_args, i);
-      Py_INCREF(item);
-      PyTuple_SET_ITEM(with_task, i, item);
+      PyTuple_SET_ITEM(with_task, i, Py_NewRef(item));
     }
 
-    this->ref();
-    PyObject *self = DTool_CreatePyInstance(this, Dtool_PythonTask, true, false);
-    PyTuple_SET_ITEM(with_task, num_args, self);
-    return with_task;
+    // Check whether we have a Python wrapper.  This is not the case if the
+    // object has been created by C++ and never been exposed to Python code.
+    if (__self__ == nullptr) {
+      // A __self__ instance does not exist, let's create one now.
+      this->ref();
+      __self__ = DTool_CreatePyInstance(this, Dtool_PythonTask, true, false);
+    }
 
-  } else {
-    Py_INCREF(_args);
-    return _args;
+    PyTuple_SET_ITEM(with_task, num_args, Py_NewRef(__self__));
+    return with_task;
+  }
+  else {
+    return Py_NewRef(_args);
   }
 }
 
@@ -188,10 +196,8 @@ get_args() {
  */
 void PythonTask::
 set_upon_death(PyObject *upon_death) {
-  Py_XDECREF(_upon_death);
+  Py_XSETREF(_upon_death, Py_NewRef(upon_death));
 
-  _upon_death = upon_death;
-  Py_INCREF(_upon_death);
   if (_upon_death != Py_None && !PyCallable_Check(_upon_death)) {
     nassert_raise("Invalid upon_death function passed to PythonTask");
   }
@@ -210,10 +216,22 @@ set_owner(PyObject *owner) {
 #ifndef NDEBUG
   if (owner != Py_None) {
     PyObject *add = PyObject_GetAttrString(owner, "_addTask");
+    PyErr_Clear();
     PyObject *clear = PyObject_GetAttrString(owner, "_clearTask");
+    PyErr_Clear();
 
-    if (add == nullptr || !PyCallable_Check(add) ||
-        clear == nullptr || !PyCallable_Check(clear)) {
+    bool valid_add = false;
+    if (add != nullptr) {
+      valid_add = PyCallable_Check(add);
+      Py_DECREF(add);
+    }
+    bool valid_clear = false;
+    if (clear != nullptr) {
+      valid_clear = PyCallable_Check(clear);
+      Py_DECREF(clear);
+    }
+
+    if (!valid_add || !valid_clear) {
       Dtool_Raise_TypeError("owner object should have _addTask and _clearTask methods");
       return;
     }
@@ -224,9 +242,7 @@ set_owner(PyObject *owner) {
     unregister_from_owner();
   }
 
-  Py_XDECREF(_owner);
-  _owner = owner;
-  Py_INCREF(_owner);
+  Py_XSETREF(_owner, Py_NewRef(owner));
 
   if (_owner != Py_None && _state != S_inactive) {
     register_to_owner();
@@ -244,14 +260,11 @@ get_result() const {
 
   if (_exception == nullptr) {
     // The result of the call is stored in _exc_value.
-    Py_XINCREF(_exc_value);
-    return _exc_value;
-  } else {
+    return Py_XNewRef(_exc_value);
+  }
+  else {
     _retrieved_exception = true;
-    Py_INCREF(_exception);
-    Py_XINCREF(_exc_value);
-    Py_XINCREF(_exc_traceback);
-    PyErr_Restore(_exception, _exc_value, _exc_traceback);
+    PyErr_Restore(Py_NewRef(_exception), Py_XNewRef(_exc_value), Py_XNewRef(_exc_traceback));
     return nullptr;
   }
 }
@@ -263,13 +276,15 @@ get_result() const {
 /*PyObject *PythonTask::
 exception() const {
   if (_exception == nullptr) {
-    Py_INCREF(Py_None);
-    return Py_None;
-  } else if (_exc_value == nullptr || _exc_value == Py_None) {
+    return Py_NewRef(Py_None);
+  }
+  else if (_exc_value == nullptr || _exc_value == Py_None) {
     return PyObject_CallNoArgs(_exception);
-  } else if (PyTuple_Check(_exc_value)) {
+  }
+  else if (PyTuple_Check(_exc_value)) {
     return PyObject_Call(_exception, _exc_value, nullptr);
-  } else {
+  }
+  else {
     return PyObject_CallOneArg(_exception, _exc_value);
   }
 }*/
@@ -285,14 +300,13 @@ __setattr__(PyObject *self, PyObject *attr, PyObject *v) {
   if (!PyUnicode_Check(attr)) {
     PyErr_Format(PyExc_TypeError,
                  "attribute name must be string, not '%.200s'",
-                 attr->ob_type->tp_name);
+                 Py_TYPE(attr)->tp_name);
     return -1;
   }
 
   PyObject *descr = _PyType_Lookup(Py_TYPE(self), attr);
   if (descr != nullptr) {
-    Py_INCREF(descr);
-    descrsetfunc f = descr->ob_type->tp_descr_set;
+    descrsetfunc f = Py_TYPE(descr)->tp_descr_set;
     if (f != nullptr) {
       return f(descr, self, v);
     }
@@ -349,11 +363,8 @@ PyObject *PythonTask::
 __getattribute__(PyObject *self, PyObject *attr) const {
   // We consult the instance dict first, since the user may have overridden a
   // method or something.
-  PyObject *item = PyDict_GetItem(__dict__, attr);
-
-  if (item != nullptr) {
-    // PyDict_GetItem returns a borrowed reference.
-    Py_INCREF(item);
+  PyObject *item;
+  if (PyDict_GetItemRef(__dict__, attr, &item) > 0) {
     return item;
   }
 
@@ -365,14 +376,13 @@ __getattribute__(PyObject *self, PyObject *attr) const {
  */
 int PythonTask::
 __traverse__(visitproc visit, void *arg) {
-/*
+  Py_VISIT(__self__);
   Py_VISIT(_function);
   Py_VISIT(_args);
   Py_VISIT(_upon_death);
   Py_VISIT(_owner);
   Py_VISIT(__dict__);
   Py_VISIT(_generator);
-*/
   return 0;
 }
 
@@ -381,15 +391,56 @@ __traverse__(visitproc visit, void *arg) {
  */
 int PythonTask::
 __clear__() {
-/*
   Py_CLEAR(_function);
   Py_CLEAR(_args);
   Py_CLEAR(_upon_death);
   Py_CLEAR(_owner);
   Py_CLEAR(__dict__);
   Py_CLEAR(_generator);
-*/
+
+  Py_CLEAR(__self__);
   return 0;
+}
+
+/**
+ *
+ */
+bool PythonTask::
+unref() const {
+  if (!AsyncTask::unref()) {
+    // It was cleaned up by the Python garbage collector.
+    return false;
+  }
+
+  // If the last reference to the object is the one being held by Python,
+  // check whether the Python wrapper itself is also at a refcount of 1.
+  bool result = true;
+  if (get_ref_count() == 1) {
+    PyGILState_STATE gstate = PyGILState_Ensure();
+
+    // Check whether we have a Python wrapper.  This is not the case if the
+    // object has been created by C++ and never been exposed to Python code.
+    PyObject *self = __self__;
+    if (self != nullptr) {
+      int ref_count = Py_REFCNT(self);
+      assert(ref_count > 0);
+      if (ref_count == 1) {
+        // The last reference to the Python wrapper is being held by us.
+        // Break the reference cycle and allow the object to go away.
+        if (!AsyncTask::unref()) {
+          PyObject_GC_UnTrack(self);
+          ((Dtool_PyInstDef *)self)->_memory_rules = false;
+          __self__ = nullptr;
+          Py_DECREF(self);
+
+          // Let the caller destroy the object.
+          result = false;
+        }
+      }
+    }
+    PyGILState_Release(gstate);
+  }
+  return result;
 }
 
 /**
@@ -406,20 +457,58 @@ cancel() {
         << "Cancelling " << *this << "\n";
     }
 
+    bool must_cancel = true;
+    if (_fut_waiter != nullptr) {
+      // Cancel the future that this task is waiting on.  Note that we do this
+      // before grabbing the lock, since this operation may also grab it.  This
+      // means that _fut_waiter is only protected by the GIL.
+#if defined(HAVE_THREADS) && !defined(SIMPLE_THREADS)
+      // Use PyGILState to protect this asynchronous call.
+      PyGILState_STATE gstate;
+      gstate = PyGILState_Ensure();
+#endif
+
+      // Shortcut for unextended AsyncFuture.
+      if (Py_IS_TYPE(_fut_waiter, Dtool_GetPyTypeObject(&Dtool_AsyncFuture))) {
+        AsyncFuture *fut = (AsyncFuture *)DtoolInstance_VOID_PTR(_fut_waiter);
+        if (!fut->done()) {
+          fut->cancel();
+        }
+        if (fut->done()) {
+          // We don't need this anymore.
+          Py_DECREF(_fut_waiter);
+          _fut_waiter = nullptr;
+        }
+      }
+      else {
+        PyObject *result = PyObject_CallMethod(_fut_waiter, "cancel", nullptr);
+        Py_XDECREF(result);
+      }
+
+#if defined(HAVE_THREADS) && !defined(SIMPLE_THREADS)
+      PyGILState_Release(gstate);
+#endif
+      // Keep _fut_waiter in any case, because we may need to cancel it again
+      // later if it ignores the cancellation.
+    }
+
     MutexHolder holder(manager->_lock);
     if (_state == S_awaiting) {
       // Reactivate it so that it can receive a CancelledException.
-      _must_cancel = true;
+      if (must_cancel) {
+        _must_cancel = true;
+      }
       _state = AsyncTask::S_active;
       _chain->_active.push_back(this);
       --_chain->_num_awaiting_tasks;
       return true;
     }
-    else if (_future_done != nullptr) {
-      // We are polling, waiting for a non-Panda future to be done.
-      Py_DECREF(_future_done);
-      _future_done = nullptr;
-      _must_cancel = true;
+    else if (must_cancel || _fut_waiter != nullptr) {
+      // We may be polling an external future, so we still need to throw a
+      // CancelledException and allow it to be caught.
+      if (must_cancel) {
+        _must_cancel = true;
+      }
       return true;
     }
     else if (_chain->do_remove(this, true)) {
@@ -479,17 +568,24 @@ AsyncTask::DoneStatus PythonTask::
 do_python_task() {
   PyObject *result = nullptr;
 
-  // Are we waiting for a future to finish?
-  if (_future_done != nullptr) {
-    PyObject *is_done = PyObject_CallNoArgs(_future_done);
-    if (!PyObject_IsTrue(is_done)) {
-      // Nope, ask again next frame.
+  // Are we waiting for a future to finish?  Short-circuit all the logic below
+  // by simply calling done().
+  {
+    PyObject *fut_waiter = _fut_waiter;
+    if (fut_waiter != nullptr) {
+      PyObject *is_done = PyObject_CallMethod(fut_waiter, "done", nullptr);
+      if (is_done == nullptr) {
+        return DS_interrupt;
+      }
+      if (!PyObject_IsTrue(is_done)) {
+        // Nope, ask again next frame.
+        Py_DECREF(is_done);
+        return DS_cont;
+      }
       Py_DECREF(is_done);
-      return DS_cont;
+      Py_DECREF(fut_waiter);
+      _fut_waiter = nullptr;
     }
-    Py_DECREF(is_done);
-    Py_DECREF(_future_done);
-    _future_done = nullptr;
   }
 
   if (_generator == nullptr) {
@@ -562,7 +658,19 @@ do_python_task() {
       Py_DECREF(_generator);
       _generator = nullptr;
 
+#if PY_VERSION_HEX >= 0x030D0000 // Python 3.13
+      // Python 3.13 does not support _PyGen_FetchStopIterationValue anymore.
+      if (PyErr_ExceptionMatches(PyExc_StopIteration)) {
+        PyObject *exc = PyErr_GetRaisedException();
+        result = ((PyStopIterationObject *)exc)->value;
+        if (result == nullptr) {
+          result = Py_None;
+        }
+        result = Py_NewRef(result);
+        Py_DECREF(exc);
+#else
       if (_PyGen_FetchStopIterationValue(&result) == 0) {
+#endif
         PyErr_Clear();
 
         if (_must_cancel) {
@@ -609,7 +717,7 @@ do_python_task() {
         _retrieved_exception = false;
 
         if (task_cat.is_debug()) {
-          if (_exception != nullptr && Py_TYPE(_exception) == &PyType_Type) {
+          if (_exception != nullptr && Py_IS_TYPE(_exception, &PyType_Type)) {
             task_cat.debug()
               << *this << " received " << ((PyTypeObject *)_exception)->tp_name << " from coroutine.\n";
           } else {
@@ -623,6 +731,11 @@ do_python_task() {
         // exception.
         return DS_done;
       }
+
+    } else if (result == Py_None) {
+      // Bare yield means to continue next frame.
+      Py_DECREF(result);
+      return DS_cont;
 
     } else if (DtoolInstance_Check(result)) {
       // We are waiting for an AsyncFuture (eg. other task) to finish.
@@ -661,7 +774,9 @@ do_python_task() {
           task_cat.error()
             << *this << " cannot await itself\n";
         }
-        Py_DECREF(result);
+        // Store the Python object in case we need to cancel it (it may be a
+        // subclass of AsyncFuture that overrides cancel() from Python)
+        _fut_waiter = result;
         return DS_await;
       }
     } else {
@@ -671,8 +786,9 @@ do_python_task() {
       if (check != nullptr && check != Py_None) {
         Py_DECREF(check);
         // Next frame, check whether this future is done.
-        _future_done = PyObject_GetAttrString(result, "done");
-        if (_future_done == nullptr || !PyCallable_Check(_future_done)) {
+        PyObject *fut_done = PyObject_GetAttrString(result, "done");
+        if (fut_done == nullptr || !PyCallable_Check(fut_done)) {
+          Py_XDECREF(fut_done);
           task_cat.error()
             << "future.done is not callable\n";
           return DS_interrupt;
@@ -683,7 +799,8 @@ do_python_task() {
             << *this << " is now polling " << PyUnicode_AsUTF8(str) << ".done()\n";
           Py_DECREF(str);
         }
-        Py_DECREF(result);
+        Py_DECREF(fut_done);
+        _fut_waiter = result;
         return DS_cont;
       }
       PyErr_Clear();
@@ -745,7 +862,7 @@ do_python_task() {
   PyMethodDef *meth = nullptr;
   if (PyCFunction_Check(result)) {
     meth = ((PyCFunctionObject *)result)->m_ml;
-  } else if (Py_TYPE(result) == &PyMethodDescr_Type) {
+  } else if (Py_IS_TYPE(result, &PyMethodDescr_Type)) {
     meth = ((PyMethodDescrObject *)result)->d_method;
   }
 
@@ -799,9 +916,10 @@ upon_death(AsyncTaskManager *manager, bool clean_exit) {
   AsyncTask::upon_death(manager, clean_exit);
 
   // If we were polling something when we were removed, get rid of it.
-  if (_future_done != nullptr) {
-    Py_DECREF(_future_done);
-    _future_done = nullptr;
+  //TODO: should we call cancel() on it?
+  if (_fut_waiter != nullptr) {
+    Py_DECREF(_fut_waiter);
+    _fut_waiter = nullptr;
   }
 
   if (_upon_death != Py_None) {
@@ -890,11 +1008,16 @@ call_owner_method(const char *method_name) {
 void PythonTask::
 call_function(PyObject *function) {
   if (function != Py_None) {
-    this->ref();
-    PyObject *self = DTool_CreatePyInstance(this, Dtool_PythonTask, true, false);
-    PyObject *result = PyObject_CallOneArg(function, self);
+    // Check whether we have a Python wrapper.  This is not the case if the
+    // object has been created by C++ and never been exposed to Python code.
+    if (__self__ == nullptr) {
+      // A __self__ instance does not exist, let's create one now.
+      this->ref();
+      __self__ = DTool_CreatePyInstance(this, Dtool_PythonTask, true, false);
+    }
+
+    PyObject *result = PyObject_CallOneArg(function, __self__);
     Py_XDECREF(result);
-    Py_DECREF(self);
   }
 }
 

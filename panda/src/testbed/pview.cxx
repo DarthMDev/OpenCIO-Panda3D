@@ -165,6 +165,17 @@ event_0(const Event *event, void *) {
 }
 
 void
+event_R(const Event *event, void *) {
+  // shift-R(eload): reload all textures
+  TextureCollection collection = TexturePool::get_global_ptr()->find_all_textures("*");
+  for (int i = 0; i < collection.size(); ++i)
+  {
+    nout << "Reloading texture " << collection[i]->get_filename() << std::endl;
+    collection[i]->reload();
+  }
+}
+
+void
 usage() {
   cerr <<
     "\n"
@@ -355,7 +366,7 @@ main(int argc, char **argv) {
 
   extern char *optarg;
   extern int optind;
-  static const char *optflags = "acls:DVhiLP:";
+  static const char *optflags = "acls:DVhiLP:S";
   int flag = getopt(argc, argv, optflags);
 
   while (flag != EOF) {
@@ -399,6 +410,14 @@ main(int argc, char **argv) {
       break;
     }
 
+    case 'S':
+      if (!PStatClient::connect()) {
+        cerr << "Failed to connect to PStats server." << endl;
+        return 1;
+      }
+      PStatClient::main_tick();
+      break;
+
     case 'V':
       report_version();
       return 1;
@@ -420,7 +439,16 @@ main(int argc, char **argv) {
   argc -= (optind - 1);
   argv += (optind - 1);
 
-  WindowFramework *window = framework.open_window(pipe, nullptr);
+  WindowProperties props(WindowProperties::get_default());
+  props.set_title("Panda Viewer");
+
+  // Don't require a window in screenshot mode
+  int flags = 0;
+  if (!auto_screenshot) {
+    flags |= GraphicsPipe::BF_require_window;
+  }
+
+  WindowFramework *window = framework.open_window(props, flags, pipe, nullptr);
   if (window != nullptr) {
     // We've successfully opened a window.
 
@@ -496,6 +524,7 @@ main(int argc, char **argv) {
     framework.define_key("shift-f", "flatten hierarchy", event_F, nullptr);
     framework.define_key("alt-enter", "toggle between window/fullscreen", event_Enter, nullptr);
     framework.define_key("2", "split the window", event_2, nullptr);
+    framework.define_key("shift-r", "reload textures", event_R, nullptr);
     if (pview_test_hack) {
       framework.define_key("0", "run quick hacky test", event_0, nullptr);
     }

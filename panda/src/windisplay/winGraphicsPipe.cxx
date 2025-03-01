@@ -247,6 +247,71 @@ WinGraphicsPipe() {
     }
   }
 
+  if (windisplay_cat.is_debug()) {
+    windisplay_cat.debug()
+      << "Detected display devices:\n";
+
+    DISPLAY_DEVICEA device;
+    device.cb = sizeof(device);
+    for (DWORD devnum = 0; EnumDisplayDevicesA(nullptr, devnum, &device, 0); ++devnum) {
+      std::ostream &out = windisplay_cat.debug();
+      out << "  " << device.DeviceName << " [" << device.DeviceString << "]";
+      if (device.StateFlags & DISPLAY_DEVICE_ACTIVE) {
+        out << " (active)";
+      }
+      if (device.StateFlags & DISPLAY_DEVICE_MULTI_DRIVER) {
+        out << " (multi-driver)";
+      }
+      if (device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) {
+        out << " (primary)";
+      }
+      if (device.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER) {
+        out << " (mirroring)";
+      }
+      if (device.StateFlags & DISPLAY_DEVICE_REMOVABLE) {
+        out << " (removable)";
+      }
+      out << "\n";
+    }
+
+    int nmonitor = GetSystemMetrics(SM_CMONITORS);
+    windisplay_cat.debug()
+      << "Detected " << nmonitor << " monitors, "
+      << (GetSystemMetrics(SM_SAMEDISPLAYFORMAT) != 0 ? "" : "NOT ")
+      << "sharing same display format:\n";
+
+    EnumDisplayMonitors(
+      nullptr,
+      nullptr,
+      [](HMONITOR monitor, HDC dc, LPRECT rect, LPARAM param) -> BOOL {
+        MONITORINFOEXA info;
+        info.cbSize = sizeof(info);
+        if (GetMonitorInfoA(monitor, &info)) {
+          std::ostream &out = windisplay_cat.debug() << "  ";
+
+          DISPLAY_DEVICEA device;
+          device.cb = sizeof(device);
+          device.StateFlags = 0;
+          if (EnumDisplayDevicesA(info.szDevice, 0, &device, 0)) {
+            out << device.DeviceName << " [" << device.DeviceString << "]";
+          }
+          else {
+            out << info.szDevice << " (device enum failed)";
+          }
+
+          if (info.dwFlags & MONITORINFOF_PRIMARY) {
+            out << " (primary)";
+          }
+          if (info.rcWork.left != 0 || info.rcWork.top != 0) {
+            out << " (at " << info.rcWork.left << "x" << info.rcWork.top << ")";
+          }
+          out << "\n";
+        }
+        return TRUE;
+      },
+      0);
+  }
+
 #ifdef HAVE_DX9
   // Use D3D to get display info.  This is disabled by default as it is slow.
   if (request_dxdisplay_information) {
@@ -263,9 +328,21 @@ WinGraphicsPipe() {
     if (windisplay_cat.is_debug()) {
       windisplay_cat.debug() << "Using EnumDisplaySettings to fetch display information.\n";
     }
+
     pvector<DisplayMode> display_modes;
+    DisplayMode current_mode = {0};
+    int current_mode_index = -1;
     DEVMODE dm{};
     dm.dmSize = sizeof(dm);
+
+    if (EnumDisplaySettings(nullptr, ENUM_CURRENT_SETTINGS, &dm) != 0) {
+      current_mode.width = dm.dmPelsWidth;
+      current_mode.height = dm.dmPelsHeight;
+      current_mode.bits_per_pixel = dm.dmBitsPerPel;
+      current_mode.refresh_rate = dm.dmDisplayFrequency;
+      current_mode.fullscreen_only = 0;
+    }
+
     for (int i = 0; EnumDisplaySettings(nullptr, i, &dm) != 0; ++i) {
       DisplayMode mode;
       mode.width = dm.dmPelsWidth;
@@ -274,6 +351,9 @@ WinGraphicsPipe() {
       mode.refresh_rate = dm.dmDisplayFrequency;
       mode.fullscreen_only = 0;
       if (i == 0 || mode != display_modes.back()) {
+        if (current_mode_index < 0 && mode == current_mode) {
+          current_mode_index = (int)display_modes.size();
+        }
         display_modes.push_back(mode);
       }
     }
@@ -281,6 +361,7 @@ WinGraphicsPipe() {
     // Copy this information to the DisplayInformation object.
     _display_information->_total_display_modes = display_modes.size();
     if (!display_modes.empty()) {
+      _display_information->_current_display_mode_index = current_mode_index;
       _display_information->_display_mode_array = new DisplayMode[display_modes.size()];
       std::copy(display_modes.begin(), display_modes.end(),
                 _display_information->_display_mode_array);

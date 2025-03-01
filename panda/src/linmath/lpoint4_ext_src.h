@@ -11,6 +11,8 @@
  * @date 2013-09-13
  */
 
+#ifdef HAVE_PYTHON
+
 /**
  * This class defines the extension methods for LPoint4, which are called
  * instead of any C++ methods with the same prototype.
@@ -20,7 +22,12 @@ class Extension<FLOATNAME(LPoint4)> : public ExtensionBase<FLOATNAME(LPoint4)> {
 public:
   INLINE_LINMATH PyObject *__getattr__(PyObject *self, const std::string &attr_name) const;
   INLINE_LINMATH int __setattr__(PyObject *self, const std::string &attr_name, PyObject *assign);
+
+  INLINE_LINMATH FLOATNAME(LPoint4) __rmul__(FLOATTYPE scalar) const;
+
   INLINE_LINMATH std::string __repr__() const;
 };
 
 #include "lpoint4_ext_src.I"
+
+#endif

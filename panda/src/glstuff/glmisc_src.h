@@ -17,6 +17,7 @@
 #include "configVariableEnum.h"
 #include "geomEnums.h"
 #include "coordinateSystem.h"
+#include "threadPriority.h"
 
 // Define some macros to transparently map to the double or float versions of
 // the OpenGL function names.
@@ -24,16 +25,8 @@
 
 #ifndef STDFLOAT_DOUBLE
 #define GLf(name) name ## f
-#define GLfv(name) name ## fv
-#define GLfc(name) name ## fc
-#define GLfr(name) name ## fr
-#define GLf_str "f"
 #else  // STDFLOAT_DOUBLE
 #define GLf(name) name ## d
-#define GLfv(name) name ## dv
-#define GLfc(name) name ## dc
-#define GLfr(name) name ## dr
-#define GLf_str "d"
 #endif  // STDFLOAT_DOUBLE
 
 #endif  // GLf
@@ -43,6 +36,7 @@
 extern EXPCL_GL ConfigVariableInt gl_version;
 extern EXPCL_GL ConfigVariableBool gl_forward_compatible;
 extern EXPCL_GL ConfigVariableBool gl_support_fbo;
+extern ConfigVariableBool gl_support_dsa;
 extern ConfigVariableBool gl_cheap_textures;
 extern ConfigVariableBool gl_ignore_clamp;
 extern ConfigVariableBool gl_support_clamp_to_border;
@@ -74,15 +68,17 @@ extern ConfigVariableBool gl_cube_map_seamless;
 extern ConfigVariableBool gl_dump_compiled_shaders;
 extern ConfigVariableBool gl_validate_shaders;
 extern ConfigVariableBool gl_immutable_texture_storage;
-extern ConfigVariableBool gl_use_bindless_texture;
 extern ConfigVariableBool gl_enable_memory_barriers;
 extern ConfigVariableBool gl_vertex_array_objects;
 extern ConfigVariableBool gl_fixed_vertex_attrib_locations;
 extern ConfigVariableBool gl_support_primitive_restart_index;
 extern ConfigVariableBool gl_support_sampler_objects;
 extern ConfigVariableBool gl_support_shadow_filter;
+extern ConfigVariableBool gl_support_vertex_array_bgra;
 extern ConfigVariableBool gl_force_image_bindings_writeonly;
 extern ConfigVariableEnum<CoordinateSystem> gl_coordinate_system;
+extern ConfigVariableInt gl_texture_transfer_num_threads;
+extern ConfigVariableEnum<ThreadPriority> gl_texture_transfer_thread_priority;
 
 extern EXPCL_GL void CLP(init_classes)();
 

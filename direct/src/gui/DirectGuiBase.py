@@ -84,23 +84,32 @@ Code overview:
     see if any keywords are left unused.  If so, an error is raised.
 """
 
+from __future__ import annotations
+
 __all__ = ['DirectGuiBase', 'DirectGuiWidget']
 
 
-from panda3d.core import *
+from panda3d.core import (
+    ConfigVariableBool,
+    KeyboardButton,
+    MouseWatcherRegion,
+    NodePath,
+    PGFrameStyle,
+    PGItem,
+    Point3,
+    Texture,
+    Vec3,
+)
 from direct.showbase import ShowBaseGlobal
 from direct.showbase.ShowBase import ShowBase
 from direct.showbase.MessengerGlobal import messenger
 from . import DirectGuiGlobals as DGG
-from .OnscreenText import *
-from .OnscreenGeom import *
-from .OnscreenImage import *
 from direct.directtools.DirectUtil import ROUND_TO
 from direct.showbase import DirectObject
 from direct.task import Task
 from direct.task.TaskManagerGlobal import taskMgr
 
-guiObjectCollector = PStatCollector("Client::GuiObjects")
+_track_gui_items = ConfigVariableBool('track-gui-items', False)
 
 
 class DirectGuiBase(DirectObject.DirectObject):
@@ -220,7 +229,12 @@ class DirectGuiBase(DirectObject.DirectObject):
                         del keywords[name]
                     else:
                         # Use optionDefs value
-                        optionInfo[name] = [default, default, function]
+                        value = default
+                        if isinstance(value, list):
+                            value = list(value)
+                        elif isinstance(value, dict):
+                            value = dict(value)
+                        optionInfo[name] = [default, value, function]
                 elif optionInfo[name][FUNCTION] is None:
                     # Only override function if not defined by derived class
                     optionInfo[name][FUNCTION] = function
@@ -609,9 +623,7 @@ class DirectGuiBase(DirectObject.DirectObject):
 
     def components(self):
         # Return a list of all components.
-        names = list(self.__componentInfo.keys())
-        names.sort()
-        return names
+        return sorted(self.__componentInfo)
 
     def hascomponent(self, component):
         return component in self.__componentInfo
@@ -638,7 +650,7 @@ class DirectGuiBase(DirectObject.DirectObject):
         """
         # Need to tack on gui item specific id
         gEvent = event + self.guiId
-        if ShowBaseGlobal.config.GetBool('debug-directgui-msgs', False):
+        if ConfigVariableBool('debug-directgui-msgs', False):
             from direct.showbase.PythonUtil import StackTrace
             print(gEvent)
             print(StackTrace())
@@ -652,8 +664,10 @@ class DirectGuiBase(DirectObject.DirectObject):
         gEvent = event + self.guiId
         self.ignore(gEvent)
 
+
 def toggleGuiGridSnap():
     DirectGuiWidget.snapToGrid = 1 - DirectGuiWidget.snapToGrid
+
 
 def setGuiGridSpacing(spacing):
     DirectGuiWidget.gridSpacing = spacing
@@ -667,13 +681,13 @@ class DirectGuiWidget(DirectGuiBase, NodePath):
     # Determine the default initial state for inactive (or
     # unclickable) components.  If we are in edit mode, these are
     # actually clickable by default.
-    guiEdit = ShowBaseGlobal.config.GetBool('direct-gui-edit', False)
+    guiEdit = ConfigVariableBool('direct-gui-edit', False)
     if guiEdit:
         inactiveInitState = DGG.NORMAL
     else:
         inactiveInitState = DGG.DISABLED
 
-    guiDict = {}
+    guiDict: dict[str, DirectGuiWidget] = {}
 
     def __init__(self, parent = None, **kw):
         # Direct gui widgets are node paths
@@ -715,7 +729,7 @@ class DirectGuiWidget(DirectGuiBase, NodePath):
             ('suppressMouse',  1,            DGG.INITOPT),
             ('suppressKeys',   0,            DGG.INITOPT),
             ('enableEdit',     1,            DGG.INITOPT),
-            )
+        )
         # Merge keyword options with default options
         self.defineoptions(kw, optiondefs)
 
@@ -730,10 +744,8 @@ class DirectGuiWidget(DirectGuiBase, NodePath):
         self.guiId = self.guiItem.getId()
 
         if ShowBaseGlobal.__dev__:
-            guiObjectCollector.addLevel(1)
-            guiObjectCollector.flushLevel()
             # track gui items by guiId for tracking down leaks
-            if ShowBaseGlobal.config.GetBool('track-gui-items', False):
+            if _track_gui_items:
                 if not hasattr(ShowBase, 'guiItems'):
                     ShowBase.guiItems = {}
                 if self.guiId in ShowBase.guiItems:
@@ -824,7 +836,7 @@ class DirectGuiWidget(DirectGuiBase, NodePath):
         vMouse2render2d = Point3(event.getMouse()[0], 0, event.getMouse()[1])
         editVec = Vec3(vWidget2render2d - vMouse2render2d)
         if base.mouseWatcherNode.getModifierButtons().isDown(
-            KeyboardButton.control()):
+                KeyboardButton.control()):
             t = taskMgr.add(self.guiScaleTask, 'guiEditTask')
             t.refPos = vWidget2render2d
             t.editVecLen = editVec.length()
@@ -905,7 +917,6 @@ class DirectGuiWidget(DirectGuiBase, NodePath):
             self.bounds[1] + bw[0],
             self.bounds[2] - bw[1],
             self.bounds[3] + bw[1])
-
 
     def getBounds(self, state = 0):
         self.stateNodePath[state].calcTightBounds(self.ll, self.ur)
@@ -1031,8 +1042,6 @@ class DirectGuiWidget(DirectGuiBase, NodePath):
     def destroy(self):
         if hasattr(self, "frameStyle"):
             if ShowBaseGlobal.__dev__:
-                guiObjectCollector.subLevel(1)
-                guiObjectCollector.flushLevel()
                 if hasattr(ShowBase, 'guiItems'):
                     ShowBase.guiItems.pop(self.guiId, None)
 

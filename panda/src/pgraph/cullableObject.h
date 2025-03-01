@@ -24,7 +24,6 @@
 #include "geomNode.h"
 #include "cullTraverserData.h"
 #include "pStatCollector.h"
-#include "deletedChain.h"
 #include "graphicsStateGuardianBase.h"
 #include "sceneSetup.h"
 #include "lightMutex.h"
@@ -46,6 +45,8 @@ public:
                         CPT(TransformState) internal_transform);
 
   INLINE CullableObject(const CullableObject &copy);
+  INLINE CullableObject(CullableObject &&from) noexcept = default;
+
   INLINE void operator = (const CullableObject &copy);
   
   virtual CullableObject *make_copy();
@@ -68,8 +69,6 @@ public:
   virtual void ensure_generated_shader(GraphicsStateGuardianBase *gsg);
 
 public:
-  ALLOC_DELETED_CHAIN(CullableObject);
-
   void output(std::ostream &out) const;
 
 public:

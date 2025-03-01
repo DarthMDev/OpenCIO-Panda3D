@@ -487,7 +487,9 @@ get_screenshot() {
   if (gsg->get_threading_model().get_draw_stage() != current_thread->get_pipeline_stage()) {
     // Ask the engine to do on the draw thread.
     GraphicsEngine *engine = window->get_engine();
-    return engine->do_get_screenshot(this, gsg);
+    return engine->run_on_draw_thread([this] {
+      return get_screenshot();
+    });
   }
 
   // We are on the draw thread.
@@ -512,6 +514,15 @@ get_screenshot() {
   window->end_frame(GraphicsOutput::FM_refresh, current_thread);
 
   return tex;
+}
+
+/**
+ *
+ */
+void DisplayRegion::
+clear_cull_result() {
+  CDCullWriter cdata_cull(_cycler_cull, true);
+  cdata_cull->_cull_result = nullptr;
 }
 
 /**
@@ -722,6 +733,7 @@ do_cull(CullHandler *cull_handler, SceneSetup *scene_setup,
  */
 DisplayRegion::CData::
 CData() :
+  _depth_range(0, 1),
   _lens_index(0),
   _camera_node(nullptr),
   _active(true),
@@ -740,6 +752,7 @@ CData() :
 DisplayRegion::CData::
 CData(const DisplayRegion::CData &copy) :
   _regions(copy._regions),
+  _depth_range(copy._depth_range),
   _lens_index(copy._lens_index),
   _camera(copy._camera),
   _camera_node(copy._camera_node),

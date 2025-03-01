@@ -59,8 +59,8 @@ PUBLISHED:
   bool is_valid() const;
   bool is_concave() const;
 
-  EXTENSION(static bool verify_points(PyObject *points));
-  EXTENSION(void setup_points(PyObject *points));
+  PY_EXTENSION(static bool verify_points(PyObject *points));
+  PY_EXTENSION(void setup_points(PyObject *points));
 
 PUBLISHED:
   MAKE_SEQ_PROPERTY(points, get_num_points, get_point);
@@ -96,9 +96,9 @@ protected:
   virtual PT(CollisionEntry)
   test_intersection_from_segment(const CollisionEntry &entry) const;
   virtual PT(CollisionEntry)
-  test_intersection_from_parabola(const CollisionEntry &entry) const;
-  virtual PT(CollisionEntry)
   test_intersection_from_capsule(const CollisionEntry &entry) const;
+  virtual PT(CollisionEntry)
+  test_intersection_from_parabola(const CollisionEntry &entry) const;
   virtual PT(CollisionEntry)
   test_intersection_from_box(const CollisionEntry &entry) const;
 
@@ -154,7 +154,7 @@ public:
   static void register_with_read_factory();
   virtual void write_datagram(BamWriter* manager, Datagram &me);
 
-  static TypedWritable *make_CollisionPolygon(const FactoryParams &params);
+  static TypedWritable *make_from_bam(const FactoryParams &params);
 
 protected:
   void fillin(DatagramIterator& scan, BamReader* manager);

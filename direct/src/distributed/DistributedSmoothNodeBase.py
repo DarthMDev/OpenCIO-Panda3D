@@ -1,21 +1,30 @@
 """DistributedSmoothNodeBase module: contains the DistributedSmoothNodeBase class"""
 
-from .ClockDelta import *
+from .ClockDelta import globalClockDelta
 from direct.task import Task
 from direct.task.TaskManagerGlobal import taskMgr
-from direct.showbase.PythonUtil import randFloat, Enum
+from direct.showbase.PythonUtil import randFloat
 from panda3d.direct import CDistributedSmoothNodeBase
+
+from enum import IntEnum
+
 
 class DummyTaskClass:
     def setDelay(self, blah):
         pass
 
+
 DummyTask = DummyTaskClass()
+
 
 class DistributedSmoothNodeBase:
     """common base class for DistributedSmoothNode and DistributedSmoothNodeAI
     """
-    BroadcastTypes = Enum('FULL, XYH, XY')
+
+    class BroadcastTypes(IntEnum):
+        FULL = 0
+        XYH = 1
+        XY = 2
 
     def __init__(self):
         self.__broadcastPeriod = None
@@ -37,6 +46,7 @@ class DistributedSmoothNodeBase:
     def b_clearSmoothing(self):
         self.d_clearSmoothing()
         self.clearSmoothing()
+
     def d_clearSmoothing(self):
         self.sendUpdate("clearSmoothing", [0])
 
@@ -79,7 +89,7 @@ class DistributedSmoothNodeBase:
             BT.FULL: self.cnode.broadcastPosHprFull,
             BT.XYH:  self.cnode.broadcastPosHprXyh,
             BT.XY:  self.cnode.broadcastPosHprXy,
-            }
+        }
         # this comment is here so it will show up in a grep for 'def d_broadcastPosHpr'
         self.d_broadcastPosHpr = broadcastFuncs[self.broadcastType]
 

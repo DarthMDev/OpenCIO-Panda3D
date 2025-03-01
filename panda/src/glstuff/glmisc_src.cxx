@@ -22,6 +22,11 @@ ConfigVariableBool gl_forward_compatible
    PRC_DESC("Setting this to true will request a forward-compatible OpenGL "
             "context, which will not support the fixed-function pipeline."));
 
+ConfigVariableBool gl_support_dsa
+  ("gl-support-dsa", true,
+   PRC_DESC("Configure this false if you suspect your GL's implementation of "
+            "Direct State Access is broken."));
+
 ConfigVariableBool gl_support_fbo
   ("gl-support-fbo", true,
    PRC_DESC("Configure this false if your GL's implementation of "
@@ -250,16 +255,6 @@ ConfigVariableBool gl_immutable_texture_storage
             "for each texture.  This improves runtime performance, but "
             "changing the size or type of a texture will be slower."));
 
-ConfigVariableBool gl_use_bindless_texture
-  ("gl-use-bindless-texture", false,
-   PRC_DESC("Set this to let Panda use OpenGL's bindless texture "
-            "extension for all textures passed to shaders, for improved "
-            "performance.  This is an experimental feature and comes "
-            "with a few caveats; for one, it requires that all sampler "
-            "uniforms have a layout(bindless_sampler) qualifier, and "
-            "it also requires that the texture properties are not "
-            "modified after the texture handle has been initialized."));
-
 ConfigVariableBool gl_enable_memory_barriers
   ("gl-enable-memory-barriers", true,
    PRC_DESC("If this is set, Panda will make sure that every write "
@@ -304,6 +299,12 @@ ConfigVariableBool gl_support_shadow_filter
             "cards suffered from a broken implementation of the "
             "shadow map filtering features."));
 
+ConfigVariableBool gl_support_vertex_array_bgra
+  ("gl-support-vertex-array-bgra", true,
+   PRC_DESC("Disable this if you suspect a bug in the driver implementation "
+            "of GL_BGRA vertex arrays.  The Radeon RX 5700 XT is an example "
+            "of a card known to suffer from bugs with this feature."));
+
 ConfigVariableBool gl_force_image_bindings_writeonly
   ("gl-force-image-bindings-writeonly", false,
    PRC_DESC("Forces all image inputs (not textures!) to be bound as writeonly, "
@@ -324,6 +325,19 @@ ConfigVariableBool gl_depth_zero_to_one
             "ranges from -1 to 1.  This setting can be used to instead use a "
             "range from 0 to 1, matching other graphics APIs.  This setting "
             "requires OpenGL 4.5, or NVIDIA GeForce 8+ hardware."));
+
+ConfigVariableInt gl_texture_transfer_num_threads
+ ("gl-texture-transfer-num-threads", 2,
+  PRC_DESC("The number of threads that will be started to upload and download "
+           "texture data asynchronously, either via the setup_async_transfer "
+           "interface on the the Texture class or via the async screenshot "
+           "interface."));
+
+ConfigVariableEnum<ThreadPriority> gl_texture_transfer_thread_priority
+ ("gl-texture-transfer-thread-priority", TP_normal,
+  PRC_DESC("The default thread priority to assign to the threads created for "
+           "asynchronous texture transfers.  The default is 'normal'; you may "
+           "also specify 'low', 'high', or 'urgent'."));
 
 extern ConfigVariableBool gl_parallel_arrays;
 
@@ -348,8 +362,6 @@ void CLP(init_classes)() {
 
 #ifndef OPENGLES
   CLP(OcclusionQueryContext)::init_type();
-  CLP(TimerQueryContext)::init_type();
-  CLP(LatencyQueryContext)::init_type();
 #endif
 
   PandaSystem *ps = PandaSystem::get_global_ptr();

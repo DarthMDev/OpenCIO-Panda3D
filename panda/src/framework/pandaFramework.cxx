@@ -37,7 +37,23 @@
 #endif
 #endif
 
+extern "C" EXPCL_PANDA_PNMIMAGETYPES void init_libpnmimagetypes();
+
 using std::string;
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+static void em_do_frame(void *arg) {
+  PandaFramework *fwx = (PandaFramework *)arg;
+  nassertv_always(fwx != NULL);
+
+  if (!fwx->do_frame(Thread::get_current_thread())) {
+    emscripten_cancel_main_loop();
+    framework_cat.info() << "Main loop cancelled.\n";
+  }
+}
+#endif
 
 LoaderOptions PandaFramework::_loader_options;
 
@@ -115,7 +131,6 @@ open_framework() {
 
   // Let's explicitly make a call to the image type library to ensure it gets
   // pulled in by the dynamic linker.
-  extern EXPCL_PANDA_PNMIMAGETYPES void init_libpnmimagetypes();
   init_libpnmimagetypes();
 
   reset_frame_rate();
@@ -188,6 +203,8 @@ close_framework() {
   }
 
   _event_handler.remove_all_hooks();
+
+  _task_mgr.cleanup();
 
   _is_open = false;
   _made_default_pipe = false;
@@ -301,6 +318,39 @@ define_key(const string &event_name, const string &description,
 
   // Now add a new hook for the keyname, and also add the new description.
   _event_handler.add_hook(event_name, function, data);
+
+  if (!description.empty()) {
+    KeyDefinition keydef;
+    keydef._event_name = event_name;
+    keydef._description = description;
+    _key_definitions.push_back(keydef);
+  }
+}
+
+/**
+ * Sets up a handler for the indicated key.  When the key is pressed in a
+ * window, the given callback will be called.  The description is a one-line
+ * description of the function of the key, for display to the user.
+ */
+void PandaFramework::
+define_key(const string &event_name, const string &description,
+           EventHandler::EventLambda function) {
+  if (_event_handler.has_hook(event_name)) {
+    // If there is already a hook for the indicated keyname, we're most likely
+    // replacing a previous definition of a key.  Search for the old
+    // definition and remove it.
+    KeyDefinitions::iterator di;
+    di = _key_definitions.begin();
+    while (di != _key_definitions.end() && (*di)._event_name != event_name) {
+      ++di;
+    }
+    if (di != _key_definitions.end()) {
+      _key_definitions.erase(di);
+    }
+  }
+
+  // Now add a new hook for the keyname, and also add the new description.
+  _event_handler.add_hook(event_name, function);
 
   if (!description.empty()) {
     KeyDefinition keydef;
@@ -759,9 +809,14 @@ do_frame(Thread *current_thread) {
  */
 void PandaFramework::
 main_loop() {
+#ifdef __EMSCRIPTEN__
+  framework_cat.info() << "Starting main loop.\n";
+  emscripten_set_main_loop_arg(&em_do_frame, (void *)this, 0, true);
+#else
   Thread *current_thread = Thread::get_current_thread();
   while (do_frame(current_thread)) {
   }
+#endif
 }
 
 /**

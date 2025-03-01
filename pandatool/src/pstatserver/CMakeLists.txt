@@ -1,9 +1,14 @@
+if(NOT BUILD_TOOLS)
+  return()
+endif()
+
 if(NOT HAVE_NET)
   return()
 endif()
 
 set(P3PSTATSERVER_HEADERS
   pStatClientData.h
+  pStatFlameGraph.h pStatFlameGraph.I
   pStatGraph.h pStatGraph.I
   pStatListener.h
   pStatMonitor.h pStatMonitor.I
@@ -12,17 +17,25 @@ set(P3PSTATSERVER_HEADERS
   pStatServer.h
   pStatStripChart.h pStatStripChart.I
   pStatThreadData.h pStatThreadData.I
+  pStatTimeline.h pStatTimeline.I
   pStatView.h pStatView.I
   pStatViewLevel.h pStatViewLevel.I
 )
 
 set(P3PSTATSERVER_SOURCES
-  pStatClientData.cxx pStatGraph.cxx
+  pStatClientData.cxx
+  pStatFlameGraph.cxx
+  pStatGraph.cxx
   pStatListener.cxx
-  pStatMonitor.cxx pStatPianoRoll.cxx
-  pStatReader.cxx pStatServer.cxx
-  pStatStripChart.cxx pStatThreadData.cxx
-  pStatView.cxx pStatViewLevel.cxx
+  pStatMonitor.cxx
+  pStatPianoRoll.cxx
+  pStatReader.cxx
+  pStatServer.cxx
+  pStatStripChart.cxx
+  pStatThreadData.cxx
+  pStatTimeline.cxx
+  pStatView.cxx
+  pStatViewLevel.cxx
 )
 
 composite_sources(p3pstatserver P3PSTATSERVER_SOURCES)

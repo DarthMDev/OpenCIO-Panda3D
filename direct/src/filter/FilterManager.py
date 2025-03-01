@@ -25,7 +25,7 @@ from panda3d.core import Camera
 from panda3d.core import OrthographicLens
 from panda3d.core import AuxBitplaneAttrib
 from panda3d.core import LightRampAttrib
-from direct.directnotify.DirectNotifyGlobal import *
+from direct.directnotify.DirectNotifyGlobal import directNotify
 from direct.showbase.DirectObject import DirectObject
 
 __all__ = ["FilterManager"]
@@ -123,8 +123,8 @@ class FilterManager(DirectObject):
             winy = winy // div
 
         if mul != 1:
-            winx = winx * mul
-            winy = winy * mul
+            winx = int(round(winx * mul))
+            winy = int(round(winy * mul))
 
         return winx,winy
 
@@ -300,7 +300,7 @@ class FilterManager(DirectObject):
 
         return quad
 
-    def createBuffer(self, name, xsize, ysize, texgroup, depthbits=1, fbprops=None):
+    def createBuffer(self, name, xsize, ysize, texgroup, depthbits=True, fbprops=None):
         """ Low-level buffer creation.  Not intended for public use. """
 
         winprops = WindowProperties()
@@ -308,7 +308,12 @@ class FilterManager(DirectObject):
         props = FrameBufferProperties(FrameBufferProperties.getDefault())
         props.setBackBuffers(0)
         props.setRgbColor(1)
-        props.setDepthBits(depthbits)
+        if depthbits is True:
+            # Respect depth-bits from Config.prc
+            if props.getDepthBits() == 0:
+                props.setDepthBits(1)
+        else:
+            props.setDepthBits(depthbits)
         props.setStereo(self.win.isStereo())
         if fbprops is not None:
             props.addProperties(fbprops)
@@ -318,7 +323,7 @@ class FilterManager(DirectObject):
             props.setAuxRgba(1)
         if auxtex1 is not None:
             props.setAuxRgba(2)
-        buffer=base.graphicsEngine.makeOutput(
+        buffer=self.engine.makeOutput(
             self.win.getPipe(), name, -1,
             props, winprops, GraphicsPipe.BFRefuseWindow | GraphicsPipe.BFResizeable,
             self.win.getGsg(), self.win)
@@ -343,10 +348,10 @@ class FilterManager(DirectObject):
 
     def resizeBuffers(self):
         """ Resize all buffers to match the size of the window. """
-        for i in range(len(self.buffers)):
+        for i, buffer in enumerate(self.buffers):
             (mul, div, align) = self.sizes[i]
             (xsize, ysize) = self.getScaledSize(mul, div, align)
-            self.buffers[i].setSize(xsize, ysize)
+            buffer.setSize(xsize, ysize)
 
     def cleanup(self):
         """ Restore everything to its original state, deleting any
@@ -362,6 +367,8 @@ class FilterManager(DirectObject):
         self.camstate = self.caminit
         self.camera.node().setInitialState(self.caminit)
         self.region.setCamera(self.camera)
+        if hasattr(self.region, 'clearCullResult'):
+            self.region.clearCullResult()
         self.nextsort = self.win.getSort() - 9
         self.basex = 0
         self.basey = 0

@@ -267,7 +267,15 @@ close() {
   _handle = nullptr;
 #else
   if (_fd != -1) {
-    ::close(_fd);
+    if (::close(_fd) < 0) {
+#ifdef NDEBUG
+      perror("close");
+#else
+      char *str = (char *)alloca(_filename.size() + 32);
+      sprintf(str, "close(%d \"%s\")", _fd, _filename.c_str());
+      perror(str);
+#endif
+    }
   }
   _fd = -1;
 #endif  // _WIN32
@@ -333,7 +341,7 @@ seekoff(streamoff off, ios_seekdir dir, ios_openmode which) {
       // Posix case.
       {
         off_t li = lseek(_fd, off, SEEK_END);
-        if (li == (off_t)-1) {
+        if (li == (off_t)-1 || (sizeof(off_t) == 8 && li == 0x7fffffffffffffff)) {
           return -1;
         }
         new_pos = (size_t)li;

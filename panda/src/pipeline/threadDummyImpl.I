@@ -63,13 +63,15 @@ prepare_for_exit() {
 }
 
 /**
- * Associates the indicated Thread object with the currently-executing thread.
+ * Associates the indicated Thread object with the currently-executing thread,
+ * unless a thread is already bound, in which case it is returned.
  * You should not call this directly; use Thread::bind_thread() instead.
  */
-INLINE void ThreadDummyImpl::
+INLINE Thread *ThreadDummyImpl::
 bind_thread(Thread *thread) {
   // This method shouldn't be called in the non-threaded case.
-  nassertv(false);
+  nassertr(false, nullptr);
+  return nullptr;
 }
 
 /**
@@ -124,3 +126,21 @@ yield() {
 INLINE void ThreadDummyImpl::
 consider_yield() {
 }
+
+/**
+ *
+ */
+INLINE bool ThreadDummyImpl::
+get_context_switches(size_t &, size_t &) {
+  return false;
+}
+
+#ifdef ANDROID
+/**
+ * Returns the JNIEnv object for the current thread.
+ */
+INLINE JNIEnv *ThreadDummyImpl::
+get_jni_env() const {
+  return _jni_env;
+}
+#endif

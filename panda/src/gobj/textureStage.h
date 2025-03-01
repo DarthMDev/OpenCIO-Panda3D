@@ -181,7 +181,7 @@ PUBLISHED:
 
   int compare_to(const TextureStage &other) const;
 
-  void write(std::ostream &out) const;
+  void write(std::ostream &out, int indent_level = 0) const;
   void output(std::ostream &out) const;
 
   INLINE static TextureStage *get_default();
@@ -262,7 +262,7 @@ public:
   virtual void write_datagram(BamWriter *manager, Datagram &me);
   virtual int complete_pointers(TypedWritable **plist, BamReader *manager);
 
-  static TypedWritable *make_TextureStage(const FactoryParams &params);
+  static TypedWritable *make_from_bam(const FactoryParams &params);
 
 protected:
   void fillin(DatagramIterator& scan, BamReader* manager);

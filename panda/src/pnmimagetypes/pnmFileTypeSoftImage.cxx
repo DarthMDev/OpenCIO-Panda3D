@@ -277,7 +277,6 @@ matches_magic_number(const string &magic_number) const {
  */
 PNMReader *PNMFileTypeSoftImage::
 make_reader(istream *file, bool owns_file, const string &magic_number) {
-  init_pnm();
   return new Reader(this, file, owns_file, magic_number);
 }
 
@@ -288,7 +287,6 @@ make_reader(istream *file, bool owns_file, const string &magic_number) {
  */
 PNMWriter *PNMFileTypeSoftImage::
 make_writer(ostream *file, bool owns_file) {
-  init_pnm();
   return new Writer(this, file, owns_file);
 }
 
@@ -727,7 +725,7 @@ write_row(xel *row_data, xelval *alpha_data) {
 void PNMFileTypeSoftImage::
 register_with_read_factory() {
   BamReader::get_factory()->
-    register_factory(get_class_type(), make_PNMFileTypeSoftImage);
+    register_factory(get_class_type(), make_from_bam);
 }
 
 /**
@@ -739,7 +737,7 @@ register_with_read_factory() {
  * we just pull the object from the registry.
  */
 TypedWritable *PNMFileTypeSoftImage::
-make_PNMFileTypeSoftImage(const FactoryParams &params) {
+make_from_bam(const FactoryParams &params) {
   return PNMFileTypeRegistry::get_global_ptr()->get_type_by_handle(get_class_type());
 }
 

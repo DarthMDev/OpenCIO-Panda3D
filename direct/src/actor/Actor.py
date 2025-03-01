@@ -1,17 +1,39 @@
 """Actor module: contains the Actor class.
 
-See the :ref:`models-and-actors` page in the Programming Guide to learn
-more about loading models and animated actors.
+See the :ref:`loading-actors-and-animations` page in the Programming Guide
+to learn more about loading animated models.
 """
 
 __all__ = ['Actor']
 
-from panda3d.core import *
+from panda3d.core import (
+    AnimBundleNode,
+    AnimControlCollection,
+    Character,
+    ConfigVariableBool,
+    DecalEffect,
+    Filename,
+    GlobPattern,
+    LineStream,
+    LoaderOptions,
+    LODNode,
+    ModelNode,
+    MovingPartBase,
+    MovingPartMatrix,
+    NodePath,
+    PandaNode,
+    PartBundle,
+    PartSubset,
+    Point3,
+    TransformState,
+    Vec3,
+    autoBind,
+)
 from panda3d.core import Loader as PandaLoader
 from direct.showbase.DirectObject import DirectObject
 from direct.showbase.Loader import Loader
 from direct.directnotify import DirectNotifyGlobal
-
+import warnings
 
 class Actor(DirectObject, NodePath):
     """
@@ -258,9 +280,7 @@ class Actor(DirectObject, NodePath):
                         self.setLODNode(node = lodNode)
                         # preserve numerical order for lod's
                         # this will make it easier to set ranges
-                        sortedKeys = list(models.keys())
-                        sortedKeys.sort()
-                        for lodName in sortedKeys:
+                        for lodName in sorted(models):
                             # make a node under the LOD switch
                             # for each lod (just because!)
                             self.addLOD(str(lodName))
@@ -280,9 +300,7 @@ class Actor(DirectObject, NodePath):
                         # it is a single part actor w/LOD
                         self.setLODNode(node = lodNode)
                         # preserve order of LOD's
-                        sortedKeys = list(models.keys())
-                        sortedKeys.sort()
-                        for lodName in sortedKeys:
+                        for lodName in sorted(models):
                             self.addLOD(str(lodName))
                             # pass in dictionary of parts
                             self.loadModel(models[lodName], lodName=lodName,
@@ -301,9 +319,7 @@ class Actor(DirectObject, NodePath):
                         if isinstance(models, dict):
                             if isinstance(models[next(iter(models))], dict):
                                 # then we have a multi-part w/ LOD
-                                sortedKeys = list(models.keys())
-                                sortedKeys.sort()
-                                for lodName in sortedKeys:
+                                for lodName in sorted(models):
                                     # iterate over both dicts
                                     for partName in anims:
                                         self.loadAnims(
@@ -314,9 +330,7 @@ class Actor(DirectObject, NodePath):
                                     self.loadAnims(anims[partName], partName)
                     elif isinstance(models, dict):
                         # then we have single-part w/ LOD
-                        sortedKeys = list(models.keys())
-                        sortedKeys.sort()
-                        for lodName in sortedKeys:
+                        for lodName in sorted(models):
                             self.loadAnims(anims, lodName=lodName)
                     else:
                         # else it is single-part w/o LOD
@@ -424,7 +438,7 @@ class Actor(DirectObject, NodePath):
                             subpartDef.subset.isIncludeEmpty(), subpartDef.subset)
 
     def __doListJoints(self, indentLevel, part, isIncluded, subset):
-        name = part.getName()
+        name = part.name
         if subset.matchesInclude(name):
             isIncluded = True
         elif subset.matchesExclude(name):
@@ -437,9 +451,9 @@ class Actor(DirectObject, NodePath):
                 part.outputValue(lineStream)
                 value = lineStream.getLine()
 
-            print(' '.join((' ' * indentLevel, part.getName(), value)))
+            print(' '.join((' ' * indentLevel, name, value)))
 
-        for child in part.getChildren():
+        for child in part.children:
             self.__doListJoints(indentLevel + 2, child, isIncluded, subset)
 
 
@@ -581,9 +595,6 @@ class Actor(DirectObject, NodePath):
         return bundles
 
     def __updateSortedLODNames(self):
-        # Cache the sorted LOD names so we don't have to grab them
-        # and sort them every time somebody asks for the list
-        self.__sortedLODNames = list(self.__partBundleDict.keys())
         # Reverse sort the doing a string->int
         def sortKey(x):
             if not str(x).isdigit():
@@ -600,7 +611,9 @@ class Actor(DirectObject, NodePath):
             else:
                 return int(x)
 
-        self.__sortedLODNames.sort(key=sortKey, reverse=True)
+        # Cache the sorted LOD names so we don't have to grab them
+        # and sort them every time somebody asks for the list
+        self.__sortedLODNames = sorted(self.__partBundleDict, key=sortKey, reverse=True)
 
     def getLODNames(self):
         """
@@ -723,6 +736,13 @@ class Actor(DirectObject, NodePath):
                 return lod
         else:
             return None
+
+    def getPlayMode(self, animName=None, partName=None):
+        if self.__animControlDict:
+            controls = self.getAnimControls(animName, partName, onlyPlaying=False)
+            if controls:
+                return controls[0].getPlayMode()
+        return None
 
     def hasLOD(self):
         """
@@ -1206,11 +1226,11 @@ class Actor(DirectObject, NodePath):
 
         return jointsA & jointsB
 
-    def __getPartJoints(self, joints, pattern, partNode, subset, isIncluded):
+    def __getPartJoints(self, joints, pattern, part, subset, isIncluded):
         """ Recursively walks the joint hierarchy to look for matching
         joint names, implementing getJoints(). """
 
-        name = partNode.getName()
+        name = part.name
         if subset:
             # Constrain the traversal just to the named subset.
             if subset.matchesInclude(name):
@@ -1218,10 +1238,10 @@ class Actor(DirectObject, NodePath):
             elif subset.matchesExclude(name):
                 isIncluded = False
 
-        if isIncluded and pattern.matches(name) and isinstance(partNode, MovingPartBase):
-            joints.append(partNode)
+        if isIncluded and pattern.matches(name) and isinstance(part, MovingPartBase):
+            joints.append(part)
 
-        for child in partNode.getChildren():
+        for child in part.children:
             self.__getPartJoints(joints, pattern, child, subset, isIncluded)
 
     def getJointTransform(self, partName, jointName, lodName='lodRoot'):
@@ -1652,6 +1672,8 @@ class Actor(DirectObject, NodePath):
 
         This method is deprecated.  You should use setBlend() instead.
         """
+        if __debug__:
+            warnings.warn("This method is deprecated.  You should use setBlend() instead.", DeprecationWarning, stacklevel=2)
         self.setBlend(animBlend = True, blendType = blendType, partName = partName)
 
     def disableBlend(self, partName = None):
@@ -1661,6 +1683,8 @@ class Actor(DirectObject, NodePath):
 
         This method is deprecated.  You should use setBlend() instead.
         """
+        if __debug__:
+            warnings.warn("This method is deprecated.  You should use setBlend() instead.", DeprecationWarning, stacklevel=2)
         self.setBlend(animBlend = False, partName = partName)
 
     def setControlEffect(self, animName, effect,
@@ -1745,7 +1769,7 @@ class Actor(DirectObject, NodePath):
         return None
 
     def getAnimControls(self, animName=None, partName=None, lodName=None,
-                        allowAsyncBind = True):
+                        allowAsyncBind = True, onlyPlaying = True):
         """getAnimControls(self, string, string=None, string=None)
 
         Returns a list of the AnimControls that represent the given
@@ -1823,7 +1847,7 @@ class Actor(DirectObject, NodePath):
                 # get all playing animations
                 for thisPart, animDict in animDictItems:
                     for anim in animDict.values():
-                        if anim.animControl and anim.animControl.isPlaying():
+                        if anim.animControl and (not onlyPlaying or anim.animControl.isPlaying()):
                             controls.append(anim.animControl)
             else:
                 # get the named animation(s) only.
@@ -2648,3 +2672,4 @@ class Actor(DirectObject, NodePath):
     get_base_frame_rate = getBaseFrameRate
     remove_anim_control_dict = removeAnimControlDict
     load_anims_on_all_lods = loadAnimsOnAllLODs
+    get_play_mode = getPlayMode

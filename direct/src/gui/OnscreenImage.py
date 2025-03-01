@@ -6,7 +6,7 @@ this class.
 
 __all__ = ['OnscreenImage']
 
-from panda3d.core import *
+from panda3d.core import CardMaker, NodePath, Texture, TexturePool, VBase3
 from direct.showbase.DirectObject import DirectObject
 
 
@@ -107,7 +107,9 @@ class OnscreenImage(DirectObject, NodePath):
                 tex = image
             else:
                 # It's a Texture file name
-                tex = base.loader.loadTexture(image)
+                tex = TexturePool.loadTexture(image)
+                if not tex:
+                    raise IOError('Could not load texture: %s' % (image))
             cm = CardMaker('OnscreenImage')
             cm.setFrame(-1, 1, -1, 1)
             self.assign(parent.attachNewNode(cm.generate(), sort))

@@ -56,20 +56,9 @@ public:
                                  const std::string &magic_number = std::string());
   virtual PNMWriter *make_writer(std::ostream *file, bool owns_file = true);
 
-protected:
-  static void init_pnm();
-
-private:
-  static bool _did_init_pnm;
-
-
   // The TypedWritable interface follows.
 public:
-  static void register_with_read_factory();
   virtual void write_datagram(BamWriter *writer, Datagram &datagram);
-
-protected:
-  static TypedWritable *make_PNMFileType(const FactoryParams &params);
 
 public:
   static TypeHandle get_class_type() {

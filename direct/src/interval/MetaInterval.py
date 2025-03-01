@@ -5,9 +5,9 @@ intervals either in parallel or in a specified sequential order.
 
 __all__ = ['MetaInterval', 'Sequence', 'Parallel', 'ParallelEndTogether', 'Track']
 
-from panda3d.core import *
-from panda3d.direct import *
-from direct.directnotify.DirectNotifyGlobal import *
+from panda3d.core import PStatCollector, ostream
+from panda3d.direct import CInterval, CMetaInterval
+from direct.directnotify.DirectNotifyGlobal import directNotify
 from .IntervalManager import ivalMgr
 from . import Interval
 from direct.task.Task import TaskManager
@@ -106,7 +106,7 @@ class MetaInterval(CMetaInterval):
         self.pstats = None
         if __debug__ and TaskManager.taskTimerVerbose:
             self.pname = name.split('-', 1)[0]
-            self.pstats = PStatCollector("App:Show code:ivalLoop:%s" % (self.pname))
+            self.pstats = PStatCollector("App:Tasks:ivalLoop:%s" % (self.pname))
 
         self.pythonIvals = []
 
@@ -348,9 +348,13 @@ class MetaInterval(CMetaInterval):
     def getManager(self):
         return self.__manager
 
+    manager = property(getManager, setManager)
+
     def setT(self, t):
         self.__updateIvals()
         CMetaInterval.setT(self, t)
+
+    t = property(CMetaInterval.getT, setT)
 
     def start(self, startT = 0.0, endT = -1.0, playRate = 1.0):
         self.__updateIvals()
@@ -475,6 +479,8 @@ class MetaInterval(CMetaInterval):
         else:
             CMetaInterval.setPlayRate(self, playRate)
 
+    play_rate = property(CMetaInterval.getPlayRate, setPlayRate)
+
     def __doPythonCallbacks(self):
         # This function invokes any Python-level Intervals that need
         # to be invoked at this point in time.  It must be called
@@ -548,6 +554,8 @@ class MetaInterval(CMetaInterval):
 
         self.__updateIvals()
         return CMetaInterval.getDuration(self)
+
+    duration = property(getDuration)
 
     def __repr__(self, *args, **kw):
         # This function overrides from the parent level to force it to

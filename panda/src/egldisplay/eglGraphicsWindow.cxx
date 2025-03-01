@@ -13,7 +13,7 @@
 
 #include "eglGraphicsWindow.h"
 
-#ifdef HAVE_X11
+#ifdef USE_X11
 
 #include "eglGraphicsStateGuardian.h"
 #include "config_egldisplay.h"
@@ -80,7 +80,7 @@ begin_frame(FrameMode mode, Thread *current_thread) {
   if (_gsg == nullptr) {
     return false;
   }
-  if (_awaiting_configure) {
+  if (_awaiting_configure_since != -1) {
     // Don't attempt to draw while we have just reconfigured the window and we
     // haven't got the notification back yet.
     return false;
@@ -223,7 +223,8 @@ open_window() {
     // If the old gsg has the wrong pixel format, create a new one that shares
     // with the old gsg.
     DCAST_INTO_R(eglgsg, _gsg, false);
-    if (!eglgsg->get_fb_properties().subsumes(_fb_properties)) {
+    if (eglgsg->get_engine() != _engine ||
+        !eglgsg->get_fb_properties().subsumes(_fb_properties)) {
       eglgsg = new eglGraphicsStateGuardian(_engine, _pipe, eglgsg);
       eglgsg->choose_pixel_format(_fb_properties, egl_pipe, true, false, false);
       _gsg = eglgsg;
@@ -279,4 +280,4 @@ open_window() {
   return true;
 }
 
-#endif  // HAVE_X11
+#endif  // USE_X11

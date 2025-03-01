@@ -48,6 +48,7 @@ BulletDebugNode(const char *name) : PandaNode(name) {
   set_bounds(bounds);
   set_final(true);
   set_overall_hidden(true);
+  set_renderable();
 }
 
 /**
@@ -152,17 +153,6 @@ draw_mask_changed() {
 }
 
 /**
- * Returns true if there is some value to visiting this particular node during
- * the cull traversal for any camera, false otherwise.  This will be used to
- * optimize the result of get_net_draw_show_mask(), so that any subtrees that
- * contain only nodes for which is_renderable() is false need not be visited.
- */
-bool BulletDebugNode::
-is_renderable() const {
-  return true;
-}
-
-/**
  * Adds the node's contents to the CullResult we are building up during the
  * cull traversal, so that it will be drawn at render time.  For most nodes
  * other than GeomNodes, this is a do-nothing operation.
@@ -258,16 +248,8 @@ add_for_draw(CullTraverser *trav, CullTraverserData &data) {
 
   // Record them without any state or transform.
   trav->_geoms_pcollector.add_level(2);
-  {
-    CullableObject *object =
-      new CullableObject(std::move(debug_lines), RenderState::make_empty(), trav->get_scene()->get_cs_world_transform());
-    trav->get_cull_handler()->record_object(object, trav);
-  }
-  {
-    CullableObject *object =
-      new CullableObject(std::move(debug_triangles), RenderState::make_empty(), trav->get_scene()->get_cs_world_transform());
-    trav->get_cull_handler()->record_object(object, trav);
-  }
+  trav->get_cull_handler()->record_object(CullableObject(std::move(debug_lines), RenderState::make_empty(), trav->get_scene()->get_cs_world_transform()), trav);
+  trav->get_cull_handler()->record_object(CullableObject(std::move(debug_triangles), RenderState::make_empty(), trav->get_scene()->get_cs_world_transform()), trav);
 }
 
 /**

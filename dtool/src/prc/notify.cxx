@@ -18,12 +18,9 @@
 #include "configVariableBool.h"
 #include "filename.h"
 #include "config_prc.h"
+#include "patomic.h"
 
 #include <ctype.h>
-
-#ifdef PHAVE_ATOMIC
-#include <atomic>
-#endif
 
 #ifdef BUILD_IPHONE
 #include <fcntl.h>
@@ -31,6 +28,11 @@
 
 #ifdef ANDROID
 #include <android/log.h>
+#include "androidLogStream.h"
+#endif
+
+#ifdef __EMSCRIPTEN__
+#include "emscriptenLogStream.h"
 #endif
 
 using std::cerr;
@@ -258,6 +260,21 @@ get_category(const string &fullname) {
 
 /**
  * A convenient way to get the ostream that should be written to for a Notify-
+ * type message of a particular severity.  Also see Category::out() for a
+ * message that is specific to a particular Category.
+ */
+ostream &Notify::
+out(NotifySeverity severity) {
+#if defined(ANDROID) || defined(__EMSCRIPTEN__)
+  // Android and JavaScript have dedicated log systems.
+  return *(ptr()->_log_streams[severity]);
+#else
+  return *(ptr()->_ostream_ptr);
+#endif
+}
+
+/**
+ * A convenient way to get the ostream that should be written to for a Notify-
  * type message.  Also see Category::out() for a message that is specific to a
  * particular Category.
  */
@@ -292,7 +309,6 @@ write_string(const string &str) {
 Notify *Notify::
 ptr() {
   if (_global_ptr == nullptr) {
-    init_memory_hook();
     _global_ptr = new Notify;
   }
   return _global_ptr;
@@ -344,9 +360,18 @@ assert_failure(const char *expression, int line,
   }
 
 #ifdef ANDROID
+  // Write to Android log system.
   __android_log_assert("assert", "Panda3D", "Assertion failed: %s", message.c_str());
 #endif
+
+#ifdef __EMSCRIPTEN__
+  // Write to JavaScript console.
+  emscripten_log(EM_LOG_CONSOLE | EM_LOG_ERROR | EM_LOG_C_STACK,
+                 "Assertion failed: %s", message.c_str());
+
+#else
   nout << "Assertion failed: " << message << "\n";
+#endif
 
   // This is redefined here, shadowing the defining in config_prc.h, so we can
   // guarantee it has already been constructed.
@@ -372,6 +397,11 @@ assert_failure(const char *expression, int line,
     // So we'll force a segfault, which works every time.
     int *ptr = nullptr;
     *ptr = 1;
+
+#elif defined(__EMSCRIPTEN__)
+    // This should drop us into the browser's JavaScript debugger.
+    //emscripten_debugger();
+    EM_ASM(debugger;);
 
 #else  // _MSC_VER
     abort();
@@ -430,13 +460,46 @@ config_initialized() {
   // notify-output even after the initial import of Panda3D modules.  However,
   // it cannot be changed after the first time it is set.
 
+#if defined(ANDROID)
+  // Android redirects stdio and stderr to /dev/null,
+  // but does provide its own logging system.  We use a special
+  // type of stream that redirects it to Android's log system.
+
+  Notify *ptr = Notify::ptr();
+
+  for (int severity = 0; severity <= NS_fatal; ++severity) {
+    int priority = ANDROID_LOG_UNKNOWN;
+    if (severity != NS_unspecified) {
+      priority = severity + 1;
+    }
+    ptr->_log_streams[severity] = new AndroidLogStream(priority);
+  }
+
+#elif defined(__EMSCRIPTEN__)
+  // We have no writable filesystem in JavaScript.  Instead, we set up a
+  // special stream that logs straight into the Javascript console.
+
+  EmscriptenLogStream *error_stream = new EmscriptenLogStream(EM_LOG_CONSOLE | EM_LOG_ERROR);
+  EmscriptenLogStream *warn_stream = new EmscriptenLogStream(EM_LOG_CONSOLE | EM_LOG_WARN);
+  EmscriptenLogStream *info_stream = new EmscriptenLogStream(EM_LOG_CONSOLE);
+
+  Notify *ptr = Notify::ptr();
+  ptr->_log_streams[NS_unspecified] = info_stream;
+  ptr->_log_streams[NS_spam] = info_stream;
+  ptr->_log_streams[NS_debug] = info_stream;
+  ptr->_log_streams[NS_info] = info_stream;
+  ptr->_log_streams[NS_warning] = warn_stream;
+  ptr->_log_streams[NS_error] = error_stream;
+  ptr->_log_streams[NS_fatal] = error_stream;
+
+#else
   if (_global_ptr == nullptr || _global_ptr->_ostream_ptr == &cerr) {
     static ConfigVariableFilename notify_output
       ("notify-output", "",
        "The filename to which to write all the output of notify");
 
     // We use this to ensure that only one thread can initialize the output.
-    static std::atomic_flag initialized = ATOMIC_FLAG_INIT;
+    static patomic_flag initialized = ATOMIC_FLAG_INIT;
 
     std::string value = notify_output.get_value();
     if (!value.empty() && !initialized.test_and_set()) {
@@ -477,6 +540,13 @@ config_initialized() {
         }
 #endif  // BUILD_IPHONE
       }
+#ifdef ANDROID
+    } else {
+      // By default, we always redirect the notify stream to the Android log.
+      Notify *ptr = Notify::ptr();
+      ptr->set_ostream_ptr(new AndroidLogStream(ANDROID_LOG_INFO), true);
+#endif
     }
   }
+#endif
 }

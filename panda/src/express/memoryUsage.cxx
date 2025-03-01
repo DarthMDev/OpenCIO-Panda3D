@@ -16,7 +16,6 @@
 #include "trueClock.h"
 #include "typedReferenceCount.h"
 #include "mutexImpl.h"
-#include "interrogate_request.h"
 
 #if defined(_MSC_VER) && defined(_DEBUG)
 #include <crtdbg.h>
@@ -535,7 +534,6 @@ MemoryUsage(const MemoryHook &copy) :
 void MemoryUsage::
 init_memory_usage() {
 #ifdef DO_MEMORY_USAGE
-  init_memory_hook();
   _global_ptr = new MemoryUsage(*memory_hook);
   memory_hook = _global_ptr;
 #else

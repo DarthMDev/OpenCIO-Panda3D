@@ -13,6 +13,8 @@
 
 #include "pnotify.h"
 
+static PStatCollector _wait_async_texture_uploads_pcollector("Wait:Async Texture Uploads");
+
 TypeHandle CLP(TextureContext)::_type_handle;
 
 /**
@@ -37,61 +39,41 @@ void CLP(TextureContext)::
 evict_lru() {
   dequeue_lru();
 
-#ifndef OPENGLES
-  if (_handle != 0) {
-    if (_handle_resident) {
-      _glgsg->_glMakeTextureHandleNonResident(_handle);
-    }
-    _handle_resident = false;
-  } else
-#endif
-  {
-    reset_data();
-  }
-
+  reset_data(_target);
   update_data_size_bytes(0);
   mark_unloaded();
 }
 
 /**
  * Resets the texture object to a new one so a new GL texture object can be
- * uploaded.
+ * uploaded.  This call also allows the texture target to be changed.
  */
 void CLP(TextureContext)::
-reset_data() {
-#ifndef OPENGLES
-  if (_handle != 0 && _handle_resident) {
-    _glgsg->_glMakeTextureHandleNonResident(_handle);
-  }
-#endif
+reset_data(GLenum target, int num_views) {
+  cancel_pending_uploads();
 
   // Free the texture resources.
-  glDeleteTextures(1, &_index);
+  set_num_views(0);
 
-  if (_buffer != 0) {
-    _glgsg->_glDeleteBuffers(1, &_buffer);
-    _buffer = 0;
-  }
+  _target = target;
 
   // We still need a valid index number, though, in case we want to re-load
   // the texture later.
-  glGenTextures(1, &_index);
+  set_num_views(num_views);
 
-#ifndef OPENGLES
-  _handle = 0;
-  _handle_resident = false;
-#endif
   _has_storage = false;
   _immutable = false;
+  _may_reload_with_mipmaps = false;
 
 #ifndef OPENGLES_1
   // Mark the texture as coherent.
-  if (gl_enable_memory_barriers) {
-    _glgsg->_textures_needing_fetch_barrier.erase(this);
-    _glgsg->_textures_needing_image_access_barrier.erase(this);
-    _glgsg->_textures_needing_update_barrier.erase(this);
-    _glgsg->_textures_needing_framebuffer_barrier.erase(this);
-  }
+  _texture_fetch_barrier_counter = _glgsg->_texture_fetch_barrier_counter - 1;
+  _shader_image_read_barrier_counter = _glgsg->_shader_image_access_barrier_counter - 1;
+  _shader_image_write_barrier_counter = _glgsg->_shader_image_access_barrier_counter - 1;
+  _texture_read_barrier_counter = _glgsg->_texture_update_barrier_counter - 1;
+  _texture_write_barrier_counter = _glgsg->_shader_image_access_barrier_counter - 1;
+  _framebuffer_read_barrier_counter = _glgsg->_framebuffer_barrier_counter - 1;
+  _framebuffer_write_barrier_counter = _glgsg->_framebuffer_barrier_counter - 1;
 #endif
 }
 
@@ -117,64 +99,124 @@ get_native_buffer_id() const {
 }
 
 /**
- *
+ * Changes the number of views in the texture.
  */
-#ifndef OPENGLES
 void CLP(TextureContext)::
-make_handle_resident() {
-  if (_handle != 0) {
-    if (!_handle_resident) {
-      _glgsg->_glMakeTextureHandleResident(_handle);
-      _handle_resident = true;
+set_num_views(int num_views) {
+  if (_num_views > num_views) {
+    glDeleteTextures(_num_views - num_views, _indices + _num_views);
+
+    if (_buffers != nullptr) {
+      _glgsg->_glDeleteBuffers(_num_views - num_views, _buffers + num_views);
     }
-    set_resident(true);
-  }
-}
+
+    if (num_views <= 1) {
+      _index = _indices[0];
+      if (_indices != &_index) {
+        delete[] _indices;
+        _indices = &_index;
+      }
+
+#ifndef OPENGLES_1
+      if (_buffers != nullptr) {
+        _buffer = _buffers[0];
+        if (_buffers != &_buffer) {
+          delete[] _buffers;
+          _buffers = &_buffer;
+        }
+        if (num_views == 0) {
+          _buffers = nullptr;
+        }
+      }
 #endif
-
-/**
- * Returns a handle for this texture.  Once this has been created, the texture
- * data may still be updated, but its properties may not.
- */
-#ifndef OPENGLES
-INLINE GLuint64 CLP(TextureContext)::
-get_handle() {
-  return 0;
-  if (!_glgsg->_supports_bindless_texture) {
-    return false;
+    }
   }
+  else if (_num_views == 0 && num_views == 1) {
+    glGenTextures(1, &_index);
+    _indices = &_index;
 
-  if (_handle == 0) {
-    _handle = _glgsg->_glGetTextureHandle(_index);
-  }
-
-  _immutable = true;
-  return _handle;
-}
+#ifndef OPENGLES_1
+    if (_target == GL_TEXTURE_BUFFER) {
+      _glgsg->_glGenBuffers(1, &_buffer);
+      _buffers = &_buffer;
+    }
 #endif
+  }
+  else if (_num_views < num_views) {
+    GLuint *new_indices = new GLuint[num_views];
+    memcpy(new_indices, _indices, sizeof(GLuint) * _num_views);
+    glGenTextures(num_views - _num_views, new_indices + _num_views);
+    if (_indices != &_index) {
+      delete[] _indices;
+    }
+    _indices = new_indices;
+
+#ifndef OPENGLES_1
+    if (_target == GL_TEXTURE_BUFFER) {
+      GLuint *new_buffers = new GLuint[num_views];
+      if (_buffers != nullptr) {
+        memcpy(new_buffers, _buffers, sizeof(GLuint) * _num_views);
+        _glgsg->_glGenBuffers(num_views - _num_views, new_buffers + _num_views);
+        if (_buffers != &_buffer) {
+          delete[] _buffers;
+        }
+      } else {
+        _glgsg->_glGenBuffers(num_views, new_buffers);
+      }
+      _buffers = new_buffers;
+    }
+#endif
+  }
+
+  _num_views = num_views;
+}
 
 #ifndef OPENGLES_1
 /**
- *
+ * Returns true if the texture needs a barrier before a read or write of the
+ * given kind.  If writing is false, only writes are synced, otherwise both
+ * reads and writes are synced.
  */
 bool CLP(TextureContext)::
-needs_barrier(GLbitfield barrier) {
+needs_barrier(GLbitfield barrier, bool writing) {
   if (!gl_enable_memory_barriers) {
     return false;
   }
 
-  return (((barrier & GL_TEXTURE_FETCH_BARRIER_BIT) &&
-           _glgsg->_textures_needing_fetch_barrier.count(this)))
-      || (((barrier & GL_SHADER_IMAGE_ACCESS_BARRIER_BIT) &&
-           _glgsg->_textures_needing_image_access_barrier.count(this)))
-      || (((barrier & GL_TEXTURE_UPDATE_BARRIER_BIT) &&
-           _glgsg->_textures_needing_update_barrier.count(this)))
-      || (((barrier & GL_FRAMEBUFFER_BARRIER_BIT) &&
-           _glgsg->_textures_needing_framebuffer_barrier.count(this)));
+  if (barrier & GL_TEXTURE_FETCH_BARRIER_BIT) {
+    // This is always a read, so only sync RAW.
+    if (_glgsg->_texture_fetch_barrier_counter == _texture_fetch_barrier_counter) {
+      return true;
+    }
+  }
+
+  if (barrier & GL_SHADER_IMAGE_ACCESS_BARRIER_BIT) {
+    // Sync WAR, WAW and RAW, but not RAR.
+    if ((writing && _glgsg->_shader_image_access_barrier_counter == _shader_image_read_barrier_counter) ||
+        (_glgsg->_shader_image_access_barrier_counter == _shader_image_write_barrier_counter)) {
+      return true;
+    }
+  }
+
+  if (barrier & GL_TEXTURE_UPDATE_BARRIER_BIT) {
+    if ((writing && _glgsg->_texture_update_barrier_counter == _texture_read_barrier_counter) ||
+        (_glgsg->_texture_update_barrier_counter == _texture_write_barrier_counter)) {
+      return true;
+    }
+  }
+
+  if (barrier & GL_FRAMEBUFFER_BARRIER_BIT) {
+    if ((writing && _glgsg->_framebuffer_barrier_counter == _framebuffer_read_barrier_counter) ||
+        (_glgsg->_framebuffer_barrier_counter == _framebuffer_write_barrier_counter)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
- * Mark a texture as needing a memory barrier, since a non-coherent read or
+ * Mark a texture as needing a memory barrier, since an unsynchronized read or
  * write just happened to it.  If 'wrote' is true, it was written to.
  */
 void CLP(TextureContext)::
@@ -186,16 +228,73 @@ mark_incoherent(bool wrote) {
   // If we only read from it, the next read operation won't need another
   // barrier, since it'll be reading the same data.
   if (wrote) {
-    _glgsg->_textures_needing_fetch_barrier.insert(this);
+    _texture_fetch_barrier_counter = _glgsg->_texture_fetch_barrier_counter;
+    _shader_image_write_barrier_counter = _glgsg->_shader_image_access_barrier_counter;
+    _texture_write_barrier_counter = _glgsg->_shader_image_access_barrier_counter;
+    _framebuffer_write_barrier_counter = _glgsg->_framebuffer_barrier_counter;
   }
 
   // We could still write to it before we read from it, so we have to always
-  // insert these barriers.  This could be slightly optimized so that we don't
-  // issue a barrier between consecutive image reads, but that may not be
-  // worth the trouble.
-  _glgsg->_textures_needing_image_access_barrier.insert(this);
-  _glgsg->_textures_needing_update_barrier.insert(this);
-  _glgsg->_textures_needing_framebuffer_barrier.insert(this);
+  // insert these barriers.
+  _shader_image_read_barrier_counter = _glgsg->_shader_image_access_barrier_counter;
+  _texture_read_barrier_counter = _glgsg->_texture_update_barrier_counter;
+  _framebuffer_read_barrier_counter = _glgsg->_framebuffer_barrier_counter;
 }
 
 #endif  // !OPENGLES_1
+
+/**
+ * Returns a PBO with the given size to the pool of unused PBOs.
+ */
+void CLP(TextureContext)::
+return_pbo(GLuint pbo, size_t size) {
+  // Also triggers when the number of buffers is -1 (which effectively means
+  // to always delete the buffers after use).
+  if (_num_pbos > get_texture()->get_num_async_transfer_buffers() ||
+      size < _pbo_size) {
+    // We have too many PBOs, or this PBO is no longer of the proper
+    // size, so delete it rather than returning it to the pool.
+    _num_pbos--;
+    _glgsg->_glDeleteBuffers(1, &pbo);
+  } else {
+    _unused_pbos.push_front(pbo);
+  }
+}
+
+/**
+ * Deletes all unused PBOs.
+ */
+void CLP(TextureContext)::
+delete_unused_pbos() {
+  if (!_unused_pbos.empty()) {
+    for (GLuint pbo : _unused_pbos) {
+      _glgsg->_glDeleteBuffers(1, &pbo);
+    }
+    _num_pbos -= (int)_unused_pbos.size();
+    _unused_pbos.clear();
+  }
+}
+
+/**
+ * Waits for all uploads to be finished.
+ */
+void CLP(TextureContext)::
+do_wait_pending_uploads() const {
+  PStatTimer timer(_wait_async_texture_uploads_pcollector);
+  do {
+    _glgsg->process_pending_jobs(true);
+  }
+  while (is_upload_pending());
+}
+
+/**
+ *
+ */
+void CLP(TextureContext)::
+do_wait_for_unused_pbo(int limit) const {
+  PStatTimer timer(_wait_async_texture_uploads_pcollector);
+  do {
+    _glgsg->process_pending_jobs(true);
+  }
+  while (_unused_pbos.empty() && _num_pbos >= limit);
+}

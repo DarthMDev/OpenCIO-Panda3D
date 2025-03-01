@@ -29,6 +29,7 @@
 #include "nativeWindowHandle.h"
 #include "parasiteBuffer.h"
 #include "pandaSystem.h"
+#include "screenshotRequest.h"
 #include "stereoDisplayRegion.h"
 #include "subprocessWindow.h"
 #include "windowHandle.h"
@@ -383,6 +384,11 @@ ConfigVariableFilename subprocess_window
           "and is not used or needed in other environments.  See "
           "WindowProperties::set_subprocess_window()."));
 
+ConfigVariableBool ime_aware
+("ime-aware", false,
+ PRC_DESC("Set this true to show candidate strings in Panda3D rather than via "
+          "an OS-provided external popup window."));
+
 ConfigVariableString framebuffer_mode
 ("framebuffer-mode", "",
  PRC_DESC("No longer has any effect.  Do not use."));
@@ -456,7 +462,8 @@ ConfigVariableInt accum_bits
  PRC_DESC("The minimum number of accumulator buffer bits requested."));
 ConfigVariableInt multisamples
 ("multisamples", 0,
- PRC_DESC("The minimum number of samples requested."));
+ PRC_DESC("The number of samples requested. Set this to 1 to request "
+          "the maximum number of samples available"));
 ConfigVariableInt back_buffers
 ("back-buffers", 1,
  PRC_DESC("The default number of back buffers requested."));
@@ -470,6 +477,12 @@ ConfigVariableInt shadow_depth_bits
  PRC_DESC("The minimum number of depth buffer bits requested when rendering "
           "shadow maps.  Set this to 32 for more depth resolution in shadow "
           "maps."));
+ConfigVariableBool shadow_cube_map_filter
+("shadow-cube-map-filter", false,
+ PRC_DESC("If true, Panda enables hardware depth map comparison mode for "
+          "point lights, if supported.  If false, does not.  Keep this set to "
+          "false if you want the shader generator to work correctly for point "
+          "light shadows."));
 
 ConfigVariableColor background_color
 ("background-color", "0.41 0.41 0.41 0.0",
@@ -523,6 +536,7 @@ init_libdisplay() {
   MouseAndKeyboard::init_type();
   NativeWindowHandle::init_type();
   ParasiteBuffer::init_type();
+  ScreenshotRequest::init_type();
   StandardMunger::init_type();
   StereoDisplayRegion::init_type();
 #ifdef SUPPORT_SUBPROCESS_WINDOW

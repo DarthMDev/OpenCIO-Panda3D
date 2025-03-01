@@ -92,7 +92,7 @@ overflow(int ch) {
  */
 void AndroidLogStream::AndroidLogStreamBuf::
 write_char(char c) {
-  nout.put(c);
+  //nout.put(c);
   if (c == '\n') {
     // Write a line to the log file.
     __android_log_write(_priority, _tag.c_str(), _data.c_str());
@@ -116,25 +116,6 @@ AndroidLogStream(int priority) :
 AndroidLogStream::
 ~AndroidLogStream() {
   delete rdbuf();
-}
-
-/**
- * Returns an AndroidLogStream suitable for writing log messages with the
- * indicated severity.
- */
-std::ostream &AndroidLogStream::
-out(NotifySeverity severity) {
-  static AndroidLogStream* streams[NS_fatal + 1] = {nullptr};
-
-  if (streams[severity] == nullptr) {
-    int priority = ANDROID_LOG_UNKNOWN;
-    if (severity != NS_unspecified) {
-      priority = ((int)severity) + 1;
-    }
-    streams[severity] = new AndroidLogStream(priority);
-  }
-
-  return *streams[severity];
 }
 
 #endif  // ANDROID

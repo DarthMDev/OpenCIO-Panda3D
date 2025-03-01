@@ -47,7 +47,7 @@ set(P3EXPRESS_HEADERS
   subfileInfo.h subfileInfo.I
   temporaryFile.h temporaryFile.I
   trueClock.I trueClock.h
-  typedReferenceCount.I typedReferenceCount.h typedef.h
+  typedReferenceCount.I typedReferenceCount.h
   virtualFileList.I virtualFileList.h
   virtualFileComposite.h virtualFileComposite.I
   virtualFile.h virtualFile.I
@@ -141,12 +141,14 @@ set(P3EXPRESS_IGATEEXT
   virtualFileSystem_ext.h
   virtualFile_ext.cxx
   virtualFile_ext.h
+  multifile_ext.h
+  multifile_ext.I
 )
 
 composite_sources(p3express P3EXPRESS_SOURCES)
 add_component_library(p3express SYMBOL BUILDING_PANDA_EXPRESS
   ${P3EXPRESS_SOURCES} ${P3EXPRESS_HEADERS})
-target_link_libraries(p3express p3pandabase p3interrogatedb p3prc p3dtool
+target_link_libraries(p3express p3pandabase p3dconfig p3prc p3dtool
   PKG::ZLIB PKG::OPENSSL)
 target_interrogate(p3express ALL EXTENSIONS ${P3EXPRESS_IGATEEXT})
 

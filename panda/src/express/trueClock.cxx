@@ -231,10 +231,12 @@ correct_time(double time) {
     // backward in the high-precision clock, since this does appear to happen
     // in a threaded environment.
 
-    clock_cat.debug()
-      << "Clock error detected; elapsed time " << time_delta
-      << "s on high-resolution counter, and " << tod_delta
-      << "s on time-of-day clock.\n";
+    if (clock_cat.is_debug()) {
+      clock_cat.debug()
+        << "Clock error detected; elapsed time " << time_delta
+        << "s on high-resolution counter, and " << tod_delta
+        << "s on time-of-day clock.\n";
+    }
     ++_error_count;
 
     // If both are negative, we call it 0.  If one is negative, we trust the
@@ -471,6 +473,46 @@ set_time_scale(double time, double new_time_scale) {
   _time_scale = new_time_scale;
 }
 
+#elif defined(__EMSCRIPTEN__)
+
+/**
+ * The Emscripten implementation.  This uses either the JavaScript function
+ * performance.now() if available, otherwise Date.now().
+ */
+
+#include <emscripten.h>
+
+/**
+ *
+ */
+double TrueClock::
+get_long_time() {
+  return emscripten_get_now() * 0.001;
+}
+
+/**
+ *
+ */
+double TrueClock::
+get_short_raw_time() {
+  return emscripten_get_now() * 0.001;
+}
+
+/**
+ *
+ */
+bool TrueClock::
+set_cpu_affinity(uint32_t mask) const {
+  return false;
+}
+
+/**
+ *
+ */
+TrueClock::
+TrueClock() {
+}
+
 #else  // !_WIN32
 
 // The Posix implementation.
@@ -479,6 +521,7 @@ set_time_scale(double time, double new_time_scale) {
 #include <stdio.h>  // for perror
 
 static long _init_sec;
+static time_t _init_sec_monotonic = 0;
 
 /**
  *
@@ -511,25 +554,13 @@ get_long_time() {
  */
 double TrueClock::
 get_short_raw_time() {
-  struct timeval tv;
-
-  int result;
-
-#ifdef GETTIMEOFDAY_ONE_PARAM
-  result = gettimeofday(&tv);
-#else
-  result = gettimeofday(&tv, nullptr);
-#endif
-
-  if (result < 0) {
-    // Error in gettimeofday().
-    return 0.0;
+#if defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
+  struct timespec spec;
+  if (clock_gettime(CLOCK_MONOTONIC, &spec) == 0) {
+    return (double)(spec.tv_sec - _init_sec_monotonic) + (double)spec.tv_nsec / 1000000000.0;
   }
-
-  // We subtract out the time at which the clock was initialized, because we
-  // don't care about the number of seconds all the way back to 1970, and we
-  // want to leave the double with as much precision as it can get.
-  return (double)(tv.tv_sec - _init_sec) + (double)tv.tv_usec / 1000000.0;
+#endif
+  return get_long_time();
 }
 
 /**
@@ -561,6 +592,16 @@ TrueClock() {
   } else {
     _init_sec = tv.tv_sec;
   }
+
+#if defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
+  struct timespec spec;
+  if (clock_gettime(CLOCK_MONOTONIC, &spec) == 0) {
+    _init_sec_monotonic = spec.tv_sec;
+  } else {
+    perror("clock_gettime(CLOCK_MONOTONIC)");
+    _init_sec_monotonic = 0;
+  }
+#endif
 }
 
 #endif

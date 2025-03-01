@@ -23,17 +23,20 @@
  * ARB_draw_buffers extensions.  This design has significant advantages over
  * the older wglGraphicsBuffer and glxGraphicsBuffer:
  *
- * * Can export depth and stencil.  * Supports auxiliary bitplanes.  *
- * Supports non-power-of-two padding.  * Supports tracking of host window
- * size.  * Supports cumulative render-to-texture.  * Faster than pbuffers.  *
- * Can render onto a texture without clearing it first.  * Supports
- * multisample antialiased rendering.
+ * - Can export depth and stencil.
+ * - Supports auxiliary bitplanes.
+ * - Supports non-power-of-two padding.
+ * - Supports tracking of host window size.
+ * - Supports cumulative render-to-texture.
+ * - Faster than pbuffers.
+ * - Can render onto a texture without clearing it first.
+ * - Supports multisample antialiased rendering.
  *
  * Some of these deserve a little explanation.  Auxiliary bitplanes are
  * additional bitplanes above and beyond the normal depth,stencil,color.  One
  * can use them to render out multiple textures in a single pass.  Cumulative
  * render-to-texture means that if don't clear the buffer, then the contents
- * of the buffer will be equal to the texture's previous contents.  This alo
+ * of the buffer will be equal to the texture's previous contents.  This also
  * means you can meaningfully share a bitplane between two buffers by binding
  * the same texture to both buffers.
  *
@@ -45,7 +48,6 @@
  * EXT_framebuffer_blit to allow for multisample antialiasing these offscreen
  * render targets.  If these extensions are unavailable the buffer will render
  * as if multisamples is 0.
- *
  */
 class EXPCL_GL CLP(GraphicsBuffer) : public GraphicsBuffer {
 public:
@@ -90,7 +92,7 @@ protected:
                  RenderTexturePlane plane, GLenum attachpoint);
   void bind_slot_multisample(bool rb_resize, Texture **attach,
                  RenderTexturePlane plane, GLenum attachpoint);
-  void attach_tex(int layer, int view, Texture *attach, GLenum attachpoint);
+  void attach_tex(GLenum attachpoint, CLP(TextureContext) *gtc, int view, int layer);
   bool check_fbo();
   void generate_mipmaps();
   void rebuild_bitplanes();
@@ -125,6 +127,10 @@ protected:
   // rendering one frame.
   typedef pvector<CLP(TextureContext)*> TextureContexts;
   TextureContexts _texture_contexts;
+
+  // List of textures we need to keep a reference to.
+  typedef pvector<PT(Texture)> Textures;
+  Textures _textures;
 
   // The cube map face we are currently drawing to or have just finished
   // drawing to, or -1 if we are not drawing to a cube map.

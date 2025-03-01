@@ -14,7 +14,7 @@
 #ifndef GEOMVERTEXFORMAT_H
 #define GEOMVERTEXFORMAT_H
 
-#include "pandabase.h"
+#include "config_gobj.h"
 #include "typedWritableReferenceCount.h"
 #include "geomVertexAnimationSpec.h"
 #include "geomVertexArrayFormat.h"
@@ -25,6 +25,7 @@
 #include "pmap.h"
 #include "pset.h"
 #include "pvector.h"
+#include "small_vector.h"
 #include "indirectCompareTo.h"
 #include "lightReMutex.h"
 
@@ -164,6 +165,13 @@ PUBLISHED:
   INLINE static const GeomVertexFormat *get_v3n3c4();
   INLINE static const GeomVertexFormat *get_v3n3c4t2();
 
+  // These are like the above, but automatically select the appropriate format
+  // based on the setting of vertex-colors-prefer-packed.
+  INLINE static const GeomVertexFormat *get_v3c();
+  INLINE static const GeomVertexFormat *get_v3ct2();
+  INLINE static const GeomVertexFormat *get_v3n3c();
+  INLINE static const GeomVertexFormat *get_v3n3ct2();
+
 public:
   bool get_array_info(const InternalName *name,
                       int &array_index,
@@ -190,7 +198,7 @@ private:
 
   GeomVertexAnimationSpec _animation;
 
-  typedef pvector< PT(GeomVertexArrayFormat) > Arrays;
+  typedef small_vector<PT(GeomVertexArrayFormat), 2> Arrays;
   Arrays _arrays;
 
   class DataTypeRecord {

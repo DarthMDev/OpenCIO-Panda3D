@@ -14,18 +14,12 @@
 #include "deletedBufferChain.h"
 #include "memoryHook.h"
 
-/**
- * Use the global MemoryHook to get a new DeletedBufferChain of the
- * appropriate size.
- */
-DeletedBufferChain::
-DeletedBufferChain(size_t buffer_size) {
-  _deleted_chain = nullptr;
-  _buffer_size = buffer_size;
+#include <set>
 
-  // We must allocate at least this much space for bookkeeping reasons.
-  _buffer_size = std::max(_buffer_size, sizeof(ObjectNode));
-}
+// This array stores the deleted chains for smaller sizes, starting with
+// sizeof(void *) and increasing in multiples thereof.
+static const size_t num_small_deleted_chains = 24;
+static DeletedBufferChain small_deleted_chains[num_small_deleted_chains] = {};
 
 /**
  * Allocates the memory for a new buffer of the indicated size (which must be
@@ -33,9 +27,12 @@ DeletedBufferChain(size_t buffer_size) {
  */
 void *DeletedBufferChain::
 allocate(size_t size, TypeHandle type_handle) {
+  assert(_buffer_size > 0);
+
 #ifdef USE_DELETED_CHAIN
   // TAU_PROFILE("void *DeletedBufferChain::allocate(size_t, TypeHandle)", "
   // ", TAU_USER);
+  // If this triggers, maybe you forgot ALLOC_DELETED_CHAIN in a subclass?
   assert(size <= _buffer_size);
 
   // Determine how much space to allocate.
@@ -50,8 +47,8 @@ allocate(size_t size, TypeHandle type_handle) {
     _lock.unlock();
 
 #ifdef USE_DELETEDCHAINFLAG
-    assert(obj->_flag == (AtomicAdjust::Integer)DCF_deleted);
-    obj->_flag = DCF_alive;
+    DeletedChainFlag orig_flag = obj->_flag.exchange(DCF_alive, std::memory_order_relaxed);
+    assert(orig_flag == DCF_deleted);
 #endif  // USE_DELETEDCHAINFLAG
 
     void *ptr = node_to_buffer(obj);
@@ -75,7 +72,7 @@ allocate(size_t size, TypeHandle type_handle) {
   obj = (ObjectNode *)(aligned - flag_reserved_bytes);
 
 #ifdef USE_DELETEDCHAINFLAG
-  obj->_flag = DCF_alive;
+  obj->_flag.store(DCF_alive, std::memory_order_relaxed);
 #endif  // USE_DELETEDCHAINFLAG
 
   void *ptr = node_to_buffer(obj);
@@ -116,14 +113,16 @@ deallocate(void *ptr, TypeHandle type_handle) {
   ObjectNode *obj = buffer_to_node(ptr);
 
 #ifdef USE_DELETEDCHAINFLAG
-  AtomicAdjust::Integer orig_flag = AtomicAdjust::compare_and_exchange(obj->_flag, DCF_alive, DCF_deleted);
+  DeletedChainFlag orig_flag = DCF_alive;
+  if (UNLIKELY(!obj->_flag.compare_exchange_strong(orig_flag, DCF_deleted,
+                                                   std::memory_order_relaxed))) {
+    // If this assertion is triggered, you double-deleted an object.
+    assert(orig_flag != DCF_deleted);
 
-  // If this assertion is triggered, you double-deleted an object.
-  assert(orig_flag != (AtomicAdjust::Integer)DCF_deleted);
-
-  // If this assertion is triggered, you tried to delete an object that was
-  // never allocated, or you have heap corruption.
-  assert(orig_flag == (AtomicAdjust::Integer)DCF_alive);
+    // If this assertion is triggered, you tried to delete an object that was
+    // never allocated, or you have heap corruption.
+    assert(orig_flag == DCF_alive);
+  }
 #endif  // USE_DELETEDCHAINFLAG
 
   _lock.lock();
@@ -136,4 +135,28 @@ deallocate(void *ptr, TypeHandle type_handle) {
 #else  // USE_DELETED_CHAIN
   PANDA_FREE_SINGLE(ptr);
 #endif  // USE_DELETED_CHAIN
+}
+
+/**
+ * Returns a new DeletedBufferChain.
+ */
+DeletedBufferChain *DeletedBufferChain::
+get_deleted_chain(size_t buffer_size) {
+  // Common, smaller sized chains avoid the expensive locking and set
+  // manipulation code further down.
+  size_t index = ((buffer_size + sizeof(void *) - 1) / sizeof(void *));
+  buffer_size = index * sizeof(void *);
+  index--;
+  if (index < num_small_deleted_chains) {
+    DeletedBufferChain *chain = &small_deleted_chains[index];
+    chain->_buffer_size = buffer_size;
+    return chain;
+  }
+
+  static MutexImpl lock;
+  lock.lock();
+  static std::set<DeletedBufferChain> deleted_chains;
+  DeletedBufferChain *result = (DeletedBufferChain *)&*deleted_chains.insert(DeletedBufferChain(buffer_size)).first;
+  lock.unlock();
+  return result;
 }

@@ -1,7 +1,6 @@
 """DistributedObject module: contains the DistributedObject class"""
 
-from panda3d.core import *
-from panda3d.direct import *
+from panda3d.direct import DCPacker
 from direct.showbase.MessengerGlobal import messenger
 from direct.directnotify.DirectNotifyGlobal import directNotify
 from direct.distributed.DistributedObjectBase import DistributedObjectBase
@@ -25,7 +24,7 @@ ESNum2Str = {
     ESDisabled: 'ESDisabled',
     ESGenerating: 'ESGenerating',
     ESGenerated: 'ESGenerated',
-    }
+}
 
 
 class DistributedObject(DistributedObjectBase):
@@ -124,8 +123,8 @@ class DistributedObject(DistributedObjectBase):
                     if field is not None:
                         p = DCPacker()
                         p.setUnpackData(field.getDefaultValue())
-                        len = p.rawUnpackUint16()/4
-                        for i in range(len):
+                        length = p.rawUnpackUint16() // 4
+                        for i in range(length):
                             zone = int(p.rawUnpackUint32())
                             autoInterests.add(zone)
                     autoInterests.update(autoInterests)
@@ -141,9 +140,9 @@ class DistributedObject(DistributedObjectBase):
         _getAutoInterests = None
         return list(autoInterests)
 
-    def setNeverDisable(self, bool):
-        assert bool == 1 or bool == 0
-        self.neverDisable = bool
+    def setNeverDisable(self, boolean):
+        assert boolean == 1 or boolean == 0
+        self.neverDisable = boolean
 
     def getNeverDisable(self):
         return self.neverDisable
@@ -177,9 +176,9 @@ class DistributedObject(DistributedObjectBase):
         # call this to throw out cached data from a previous instantiation
         self._cachedData[name].flush()
 
-    def setCacheable(self, bool):
-        assert bool == 1 or bool == 0
-        self.cacheable = bool
+    def setCacheable(self, boolean):
+        assert boolean == 1 or boolean == 0
+        self.cacheable = boolean
 
     def getCacheable(self):
         return self.cacheable
@@ -240,7 +239,6 @@ class DistributedObject(DistributedObjectBase):
         generated and all of its required fields filled in.
         """
         assert self.notify.debug('announceGenerate(): %s' % (self.doId))
-
 
     def _deactivateDO(self):
         # after this is called, the object is no longer an active DistributedObject
@@ -325,9 +323,9 @@ class DistributedObject(DistributedObjectBase):
         """
         return self.doId
 
-
     #This message was moved out of announce generate
     #to avoid ordering issues.
+
     def postGenerateMessage(self):
         if self.activeState != ESGenerated:
             self.activeState = ESGenerated

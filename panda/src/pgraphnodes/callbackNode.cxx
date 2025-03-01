@@ -30,6 +30,7 @@ CallbackNode(const std::string &name) :
   PandaNode(name)
 {
   PandaNode::set_cull_callback();
+  PandaNode::set_renderable();
 
   // Set up a default, infinite bounding volume, unless the user tells us
   // otherwise.  Not sure if this is a great idea, because it means a naive
@@ -103,17 +104,6 @@ cull_callback(CullTraverser *trav, CullTraverserData &data) {
 }
 
 /**
- * Returns true if there is some value to visiting this particular node during
- * the cull traversal for any camera, false otherwise.  This will be used to
- * optimize the result of get_net_draw_show_mask(), so that any subtrees that
- * contain only nodes for which is_renderable() is false need not be visited.
- */
-bool CallbackNode::
-is_renderable() const {
-  return true;
-}
-
-/**
  * Adds the node's contents to the CullResult we are building up during the
  * cull traversal, so that it will be drawn at render time.  For most nodes
  * other than GeomNodes, this is a do-nothing operation.
@@ -131,11 +121,10 @@ add_for_draw(CullTraverser *trav, CullTraverserData &data) {
   // Geoms, however.
   CallbackObject *cbobj = get_draw_callback();
   if (cbobj != nullptr) {
-    CullableObject *object =
-      new CullableObject(nullptr, data._state,
-                         data.get_internal_transform(trav));
-    object->set_draw_callback(cbobj);
-    trav->get_cull_handler()->record_object(object, trav);
+    CullableObject object(nullptr, data._state,
+                          data.get_internal_transform(trav));
+    object.set_draw_callback(cbobj);
+    trav->get_cull_handler()->record_object(std::move(object), trav);
   }
 }
 

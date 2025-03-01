@@ -11,6 +11,8 @@
  * @date 2013-09-12
  */
 
+#ifdef HAVE_PYTHON
+
 /**
  * This class defines the extension methods for LMatrix3, which are called
  * instead of any C++ methods with the same prototype.
@@ -19,7 +21,12 @@ template<>
 class Extension<FLOATNAME(LMatrix3)> : public ExtensionBase<FLOATNAME(LMatrix3)> {
 public:
   INLINE_LINMATH PyObject *__reduce__(PyObject *self) const;
+
+  INLINE_LINMATH FLOATNAME(LMatrix3) __rmul__(FLOATTYPE scalar) const;
+
   INLINE_LINMATH std::string __repr__() const;
 };
 
 #include "lmatrix3_ext_src.I"
+
+#endif

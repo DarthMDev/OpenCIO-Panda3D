@@ -96,7 +96,7 @@ __init__(PyObject *self, PyObject *source) {
 
   // Now construct the internal list by copying the elements one-at-a-time
   // from Python.
-  PyObject *dict = DtoolInstance_TYPE(self)->_PyType.tp_dict;
+  PyObject *dict = Dtool_GetPyTypeObject(DtoolInstance_TYPE(self))->tp_dict;
   PyObject *push_back = PyDict_GetItemString(dict, "push_back");
   if (push_back == nullptr) {
     PyErr_BadArgument();
@@ -106,12 +106,13 @@ __init__(PyObject *self, PyObject *source) {
   // We need to initialize the this pointer before we can call push_back.
   DtoolInstance_INIT_PTR(self, this->_this);
 
+  Py_BEGIN_CRITICAL_SECTION(source);
   Py_ssize_t size = PySequence_Size(source);
   this->_this->reserve(size);
   for (Py_ssize_t i = 0; i < size; ++i) {
     PyObject *item = PySequence_GetItem(source, i);
     if (item == nullptr) {
-      return;
+      break;
     }
     PyObject *result = PyObject_CallFunctionObjArgs(push_back, self, item, nullptr);
     Py_DECREF(item);
@@ -121,10 +122,11 @@ __init__(PyObject *self, PyObject *source) {
       PyErr_Format(PyExc_TypeError,
                    "Element %zd in sequence passed to PointerToArray "
                    "constructor could not be added", i);
-      return;
+      break;
     }
     Py_DECREF(result);
   }
+  Py_END_CRITICAL_SECTION();
 }
 
 /**
@@ -213,9 +215,9 @@ set_data(PyObject *data) {
 template<class Element>
 INLINE PyObject *Extension<PointerToArray<Element> >::
 get_subdata(size_t n, size_t count) const {
-  n = std::min(n, this->_this->size());
-  count = std::max(count, n);
-  count = std::min(count, this->_this->size() - n);
+  n = (std::min)(n, this->_this->size());
+  count = (std::max)(count, n);
+  count = (std::min)(count, this->_this->size() - n);
   return PyBytes_FromStringAndSize((char *)(this->_this->p() + n), sizeof(Element) * count);
 }
 
@@ -269,9 +271,9 @@ get_data() const {
 template<class Element>
 INLINE PyObject *Extension<ConstPointerToArray<Element> >::
 get_subdata(size_t n, size_t count) const {
-  n = std::min(n, this->_this->size());
-  count = std::max(count, n);
-  count = std::min(count, this->_this->size() - n);
+  n = (std::min)(n, this->_this->size());
+  count = (std::max)(count, n);
+  count = (std::min)(count, this->_this->size() - n);
   return PyBytes_FromStringAndSize((char *)(this->_this->p() + n), sizeof(Element) * count);
 }
 
@@ -304,10 +306,7 @@ __getbuffer__(PyObject *self, Py_buffer *view, int flags) {
     return -1;
   }
 
-  if (self != nullptr) {
-    Py_INCREF(self);
-  }
-  view->obj = self;
+  view->obj = Py_XNewRef(self);
   view->buf = (void*) this->_this->p();
   view->len = this->_this->size() * sizeof(Element);
   view->readonly = 0;
@@ -345,10 +344,7 @@ __getbuffer__(PyObject *self, Py_buffer *view, int flags) {
 template<>
 INLINE int Extension<PointerToArray<LMatrix3f> >::
 __getbuffer__(PyObject *self, Py_buffer *view, int flags) {
-  if (self != nullptr) {
-    Py_INCREF(self);
-  }
-  view->obj = self;
+  view->obj = Py_XNewRef(self);
   view->buf = (void*) this->_this->p();
   set_matrix_view(*view, flags, this->_this->size(), 3, false, false);
 
@@ -367,10 +363,7 @@ __getbuffer__(PyObject *self, Py_buffer *view, int flags) {
 template<>
 INLINE int Extension<PointerToArray<LMatrix3d> >::
 __getbuffer__(PyObject *self, Py_buffer *view, int flags) {
-  if (self != nullptr) {
-    Py_INCREF(self);
-  }
-  view->obj = self;
+  view->obj = Py_XNewRef(self);
   view->buf = (void*) this->_this->p();
   set_matrix_view(*view, flags, this->_this->size(), 3, true, false);
 
@@ -389,10 +382,7 @@ __getbuffer__(PyObject *self, Py_buffer *view, int flags) {
 template<>
 INLINE int Extension<PointerToArray<UnalignedLMatrix4f> >::
 __getbuffer__(PyObject *self, Py_buffer *view, int flags) {
-  if (self != nullptr) {
-    Py_INCREF(self);
-  }
-  view->obj = self;
+  view->obj = Py_XNewRef(self);
   view->buf = (void*) this->_this->p();
   set_matrix_view(*view, flags, this->_this->size(), 4, false, false);
 
@@ -411,10 +401,7 @@ __getbuffer__(PyObject *self, Py_buffer *view, int flags) {
 template<>
 INLINE int Extension<PointerToArray<UnalignedLMatrix4d> >::
 __getbuffer__(PyObject *self, Py_buffer *view, int flags) {
-  if (self != nullptr) {
-    Py_INCREF(self);
-  }
-  view->obj = self;
+  view->obj = Py_XNewRef(self);
   view->buf = (void*) this->_this->p();
   set_matrix_view(*view, flags, this->_this->size(), 4, true, false);
 
@@ -441,6 +428,20 @@ __releasebuffer__(PyObject *self, Py_buffer *view) const {
 }
 
 /**
+ * A special Python method that is invoked by copy.deepcopy(pta).  This makes
+ * sure that there is truly a unique copy of the array.
+ */
+template<class Element>
+INLINE PointerToArray<Element> Extension<PointerToArray<Element> >::
+__deepcopy__(PyObject *memo) const {
+  PointerToArray<Element> copy;
+  if (!this->_this->is_null()) {
+    copy.v() = this->_this->v();
+  }
+  return copy;
+}
+
+/**
  * This is used to implement the buffer protocol, in order to allow efficient
  * access to the array data through a Python multiview object.
  */
@@ -459,10 +460,7 @@ __getbuffer__(PyObject *self, Py_buffer *view, int flags) const {
     return -1;
   }
 
-  if (self != nullptr) {
-    Py_INCREF(self);
-  }
-  view->obj = self;
+  view->obj = Py_XNewRef(self);
   view->buf = (void*) this->_this->p();
   view->len = this->_this->size() * sizeof(Element);
   view->readonly = 1;
@@ -504,10 +502,7 @@ __getbuffer__(PyObject *self, Py_buffer *view, int flags) const {
                     "Object is not writable.");
     return -1;
   }
-  if (self != nullptr) {
-    Py_INCREF(self);
-  }
-  view->obj = self;
+  view->obj = Py_XNewRef(self);
   view->buf = (void*) this->_this->p();
   set_matrix_view(*view, flags, this->_this->size(), 3, false, true);
 
@@ -530,10 +525,7 @@ __getbuffer__(PyObject *self, Py_buffer *view, int flags) const {
                     "Object is not writable.");
     return -1;
   }
-  if (self != nullptr) {
-    Py_INCREF(self);
-  }
-  view->obj = self;
+  view->obj = Py_XNewRef(self);
   view->buf = (void*) this->_this->p();
   set_matrix_view(*view, flags, this->_this->size(), 3, true, true);
 
@@ -556,10 +548,7 @@ __getbuffer__(PyObject *self, Py_buffer *view, int flags) const {
                     "Object is not writable.");
     return -1;
   }
-  if (self != nullptr) {
-    Py_INCREF(self);
-  }
-  view->obj = self;
+  view->obj = Py_XNewRef(self);
   view->buf = (void*) this->_this->p();
   set_matrix_view(*view, flags, this->_this->size(), 4, false, true);
 
@@ -582,10 +571,7 @@ __getbuffer__(PyObject *self, Py_buffer *view, int flags) const {
                     "Object is not writable.");
     return -1;
   }
-  if (self != nullptr) {
-    Py_INCREF(self);
-  }
-  view->obj = self;
+  view->obj = Py_XNewRef(self);
   view->buf = (void*) this->_this->p();
   set_matrix_view(*view, flags, this->_this->size(), 4, true, true);
 
@@ -609,4 +595,18 @@ __releasebuffer__(PyObject *self, Py_buffer *view) const {
     unref_delete((const PointerToArray<Element> *)view->internal);
     view->internal = nullptr;
   }
+}
+
+/**
+ * A special Python method that is invoked by copy.deepcopy(pta).  This makes
+ * sure that there is truly a unique copy of the array.
+ */
+template<class Element>
+INLINE ConstPointerToArray<Element> Extension<ConstPointerToArray<Element> >::
+__deepcopy__(PyObject *memo) const {
+  PointerToArray<Element> copy;
+  if (!this->_this->is_null()) {
+    copy.v() = this->_this->v();
+  }
+  return copy;
 }

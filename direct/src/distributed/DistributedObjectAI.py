@@ -4,8 +4,6 @@ from direct.directnotify.DirectNotifyGlobal import directNotify
 from direct.distributed.DistributedObjectBase import DistributedObjectBase
 from direct.showbase.MessengerGlobal import messenger
 from direct.showbase import PythonUtil
-from panda3d.core import *
-from panda3d.direct import *
 #from PyDatagram import PyDatagram
 #from PyDatagramIterator import PyDatagramIterator
 
@@ -491,7 +489,7 @@ class DistributedObjectAI(DistributedObjectBase):
         # simultaneously on different lists of avatars, although they
         # should have different names.
 
-        from otp.ai import Barrier
+        from otp.ai import Barrier  # type: ignore[import-not-found]
         context = self.__nextBarrierContext
         # We assume the context number is passed as a uint16.
         self.__nextBarrierContext = (self.__nextBarrierContext + 1) & 0xffff

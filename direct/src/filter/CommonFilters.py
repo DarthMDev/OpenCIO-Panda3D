@@ -1,25 +1,26 @@
 """
-
 Class CommonFilters implements certain common image
 postprocessing filters.  See the :ref:`common-image-filters` page for
 more information about how to use these filters.
 
-It is not ideal that these filters are all included in a single
-monolithic module.  Unfortunately, when you want to apply two filters
-at the same time, you have to compose them into a single shader, and
-the composition process isn't simply a question of concatenating them:
-you have to somehow make them work together.  I suspect that there
-exists some fairly simple framework that would make this automatable.
-However, until I write some more filters myself, I won't know what
-that framework is.  Until then, I'll settle for this
-clunky approach.  - Josh
-
+These filters are written in the Cg shading language.
 """
 
+# It is not ideal that these filters are all included in a single
+# monolithic module.  Unfortunately, when you want to apply two filters
+# at the same time, you have to compose them into a single shader, and
+# the composition process isn't simply a question of concatenating them:
+# you have to somehow make them work together.  I suspect that there
+# exists some fairly simple framework that would make this automatable.
+# However, until I write some more filters myself, I won't know what
+# that framework is.  Until then, I'll settle for this
+# clunky approach.  - Josh
+
 from panda3d.core import LVecBase4, LPoint2
-from panda3d.core import AuxBitplaneAttrib
+from panda3d.core import AuxBitplaneAttrib, AntialiasAttrib
 from panda3d.core import Texture, Shader, ATSNone
 from panda3d.core import FrameBufferProperties
+from panda3d.core import getDefaultCoordinateSystem, CS_zup_right, CS_zup_left
 
 from direct.task.TaskManagerGlobal import taskMgr
 
@@ -52,6 +53,7 @@ o_color = lerp(o_color, k_cartooncolor, cartoon_thresh);
 SSAO_BODY = """//Cg
 
 void vshader(float4 vtx_position : POSITION,
+             float2 vtx_texcoord : TEXCOORD0,
              out float4 l_position : POSITION,
              out float2 l_texcoord : TEXCOORD0,
              out float2 l_texcoordD : TEXCOORD1,
@@ -61,9 +63,9 @@ void vshader(float4 vtx_position : POSITION,
              uniform float4x4 mat_modelproj)
 {
   l_position = mul(mat_modelproj, vtx_position);
-  l_texcoord = vtx_position.xz;
-  l_texcoordD = (vtx_position.xz * texpad_depth.xy) + texpad_depth.xy;
-  l_texcoordN = (vtx_position.xz * texpad_normal.xy) + texpad_normal.xy;
+  l_texcoord = vtx_texcoord;
+  l_texcoordD = vtx_texcoord * texpad_depth.xy * 2;
+  l_texcoordN = vtx_texcoord * texpad_normal.xy * 2;
 }
 
 float3 sphere[16] = float3[](float3(0.53812504, 0.18565957, -0.43192),float3(0.13790712, 0.24864247, 0.44301823),float3(0.33715037, 0.56794053, -0.005789503),float3(-0.6999805, -0.04511441, -0.0019965635),float3(0.06896307, -0.15983082, -0.85477847),float3(0.056099437, 0.006954967, -0.1843352),float3(-0.014653638, 0.14027752, 0.0762037),float3(0.010019933, -0.1924225, -0.034443386),float3(-0.35775623, -0.5301969, -0.43581226),float3(-0.3169221, 0.106360726, 0.015860917),float3(0.010350345, -0.58698344, 0.0046293875),float3(-0.08972908, -0.49408212, 0.3287904),float3(0.7119986, -0.0154690035, -0.09183723),float3(-0.053382345, 0.059675813, -0.5411899),float3(0.035267662, -0.063188605, 0.54602677),float3(-0.47761092, 0.2847911, -0.0271716));
@@ -96,6 +98,11 @@ void fshader(out float4 o_color : COLOR,
   o_color.a = 1.0;
 }
 """
+
+
+class ToneMap:
+    ACES = object()
+    PBR_NEUTRAL = object()
 
 
 class FilterConfig:
@@ -187,10 +194,21 @@ class CommonFilters:
                 fbprops.setSrgbColor(False)
                 clamping = False
 
+            if "MSAA" in configuration:
+                if fbprops is None:
+                    fbprops = FrameBufferProperties()
+                fbprops.setMultisamples(configuration["MSAA"].samples)
+
             self.finalQuad = self.manager.renderSceneInto(textures = self.textures, auxbits=auxbits, fbprops=fbprops, clamping=clamping)
             if self.finalQuad is None:
                 self.cleanup()
                 return False
+
+            if "MSAA" in configuration:
+                camNode = self.manager.camera.node()
+                state = camNode.getInitialState()
+                state.setAttrib(AntialiasAttrib.make(AntialiasAttrib.M_multisample))
+                camNode.setInitialState(state)
 
             if "BlurSharpen" in configuration:
                 blur0 = self.textures["blur0"]
@@ -266,16 +284,19 @@ class CommonFilters:
 
             text = "//Cg\n"
             if "HighDynamicRange" in configuration:
-                text += "static const float3x3 aces_input_mat = {\n"
-                text += "  {0.59719, 0.35458, 0.04823},\n"
-                text += "  {0.07600, 0.90834, 0.01566},\n"
-                text += "  {0.02840, 0.13383, 0.83777},\n"
-                text += "};\n"
-                text += "static const float3x3 aces_output_mat = {\n"
-                text += "  { 1.60475, -0.53108, -0.07367},\n"
-                text += "  {-0.10208,  1.10813, -0.00605},\n"
-                text += "  {-0.00327, -0.07276,  1.07602},\n"
-                text += "};\n"
+                tonemap = configuration["HighDynamicRange"]
+                if tonemap is ToneMap.ACES:
+                    text += "static const float3x3 aces_input_mat = {\n"
+                    text += "  {0.59719, 0.35458, 0.04823},\n"
+                    text += "  {0.07600, 0.90834, 0.01566},\n"
+                    text += "  {0.02840, 0.13383, 0.83777},\n"
+                    text += "};\n"
+                    text += "static const float3x3 aces_output_mat = {\n"
+                    text += "  { 1.60475, -0.53108, -0.07367},\n"
+                    text += "  {-0.10208,  1.10813, -0.00605},\n"
+                    text += "  {-0.00327, -0.07276,  1.07602},\n"
+                    text += "};\n"
+
             text += "void vshader(float4 vtx_position : POSITION,\n"
             text += "  out float4 l_position : POSITION,\n"
 
@@ -292,11 +313,19 @@ class CommonFilters:
             text += "{\n"
             text += "  l_position = mul(mat_modelproj, vtx_position);\n"
 
+            # The card is oriented differently depending on our chosen
+            # coordinate system.  We could just use vtx_texcoord, but this
+            # saves on an additional variable.
+            if getDefaultCoordinateSystem() in (CS_zup_right, CS_zup_left):
+                pos = "vtx_position.xz"
+            else:
+                pos = "vtx_position.xy"
+
             for texcoord, padTex in texcoordPadding.items():
                 if padTex is None:
-                    text += "  %s = vtx_position.xz * float2(0.5, 0.5) + float2(0.5, 0.5);\n" % (texcoord)
+                    text += "  %s = %s * float2(0.5, 0.5) + float2(0.5, 0.5);\n" % (texcoord, pos)
                 else:
-                    text += "  %s = (vtx_position.xz * texpad_tx%s.xy) + texpad_tx%s.xy;\n" % (texcoord, padTex, padTex)
+                    text += "  %s = (%s * texpad_tx%s.xy) + texpad_tx%s.xy;\n" % (texcoord, pos, padTex, padTex)
 
                     if "HalfPixelShift" in configuration:
                         text += "  %s += texpix_tx%s.xy * 0.5;\n" % (texcoord, padTex)
@@ -330,7 +359,7 @@ class CommonFilters:
             text += "{\n"
             text += "  o_color = tex2D(k_txcolor, %s);\n" % (texcoords["color"])
             if "CartoonInk" in configuration:
-                text += CARTOON_BODY % {"texcoord" : texcoords["aux"]}
+                text += CARTOON_BODY % {"texcoord": texcoords["aux"]}
             if "AmbientOcclusion" in configuration:
                 text += "  o_color *= tex2D(k_txssao2, %s).r;\n" % (texcoords["ssao2"])
             if "BlurSharpen" in configuration:
@@ -360,10 +389,30 @@ class CommonFilters:
             if "ExposureAdjust" in configuration:
                 text += "  o_color.rgb *= k_exposure;\n"
 
-            # With thanks to Stephen Hill!
             if "HighDynamicRange" in configuration:
-                text += "  float3 aces_color = mul(aces_input_mat, o_color.rgb);\n"
-                text += "  o_color.rgb = saturate(mul(aces_output_mat, (aces_color * (aces_color + 0.0245786f) - 0.000090537f) / (aces_color * (0.983729f * aces_color + 0.4329510f) + 0.238081f)));\n"
+                tonemap = configuration["HighDynamicRange"]
+                if tonemap is ToneMap.ACES:
+                    # With thanks to Stephen Hill!
+                    text += "  float3 aces_color = mul(aces_input_mat, o_color.rgb);\n"
+                    text += "  o_color.rgb = saturate(mul(aces_output_mat, (aces_color * (aces_color + 0.0245786f) - 0.000090537f) / (aces_color * (0.983729f * aces_color + 0.4329510f) + 0.238081f)));\n"
+                elif tonemap is ToneMap.PBR_NEUTRAL:
+                    text += "  const float start_compression = 0.8 - 0.04;\n"
+                    text += "  const float desaturation = 0.15;\n"
+
+                    text += "  float x = min(o_color.r, min(o_color.g, o_color.b));\n"
+                    text += "  float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;\n"
+                    text += "  o_color.rgb -= offset;\n"
+
+                    text += "  float peak = max(o_color.r, max(o_color.g, o_color.b));\n"
+
+                    text += "  if (peak >= start_compression) {\n"
+                    text += "    const float d = 1.0 - start_compression;\n"
+                    text += "    float new_peak = 1.0 - d * d / (peak + d - start_compression);\n"
+                    text += "    o_color.rgb *= new_peak / peak;\n"
+                    text += "    float g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);\n"
+
+                    text += "    o_color.rgb = lerp(o_color.rgb, new_peak * float3(1, 1, 1), g);\n"
+                    text += "}\n"
 
             if "GammaAdjust" in configuration:
                 gamma = configuration["GammaAdjust"]
@@ -444,6 +493,26 @@ class CommonFilters:
         if task is not None:
             return task.cont
 
+    def setMSAA(self, samples):
+        """Enables multisample anti-aliasing on the render-to-texture buffer.
+        If you enable this, it is recommended to leave any multisample request
+        on the main framebuffer OFF (ie. don't set framebuffer-multisample true
+        in Config.prc), since it would be a waste of resources otherwise.
+
+        .. versionadded:: 1.10.13
+        """
+        fullrebuild = "MSAA" not in self.configuration or self.configuration["MSAA"].samples != samples
+        newconfig = FilterConfig()
+        newconfig.samples = samples
+        self.configuration["MSAA"] = newconfig
+        return self.reconfigure(fullrebuild, "MSAA")
+
+    def delMSAA(self):
+        if "MSAA" in self.configuration:
+            del self.configuration["MSAA"]
+            return self.reconfigure(True, "MSAA")
+        return True
+
     def setCartoonInk(self, separation=1, color=(0, 0, 0, 1)):
         fullrebuild = ("CartoonInk" not in self.configuration)
         newconfig = FilterConfig()
@@ -459,6 +528,11 @@ class CommonFilters:
         return True
 
     def setBloom(self, blend=(0.3,0.4,0.3,0.0), mintrigger=0.6, maxtrigger=1.0, desat=0.6, intensity=1.0, size="medium"):
+        """
+        Applies the Bloom filter to the output.
+        size can either be "off", "small", "medium", or "large".
+        Setting size to "off" will remove the Bloom filter.
+        """
         if size == 0 or size == "off":
             self.delBloom()
             return
@@ -548,7 +622,7 @@ class CommonFilters:
         return True
 
     def setBlurSharpen(self, amount=0.0):
-        """Enables the blur/sharpen filter. If the 'amount' parameter is 1.0, it will not have effect.
+        """Enables the blur/sharpen filter. If the 'amount' parameter is 1.0, it will not have any effect.
         A value of 0.0 means fully blurred, and a value higher than 1.0 sharpens the image."""
         fullrebuild = ("BlurSharpen" not in self.configuration)
         self.configuration["BlurSharpen"] = amount
@@ -622,10 +696,10 @@ class CommonFilters:
             return self.reconfigure(old_enable, "SrgbEncode")
         return True
 
-    def setHighDynamicRange(self):
+    def setHighDynamicRange(self, tonemap=ToneMap.ACES):
         """ Enables HDR rendering by using a floating-point framebuffer,
         disabling color clamping on the main scene, and applying a tone map
-        operator (ACES).
+        operator (ACES or Khronos PBR Neutral).
 
         It may also be necessary to use setExposureAdjust to perform exposure
         compensation on the scene, depending on the lighting intensity.
@@ -633,8 +707,11 @@ class CommonFilters:
         .. versionadded:: 1.10.7
         """
 
-        fullrebuild = (("HighDynamicRange" in self.configuration) is False)
-        self.configuration["HighDynamicRange"] = 1
+        fullrebuild = "HighDynamicRange" not in self.configuration or \
+                      self.configuration["HighDynamicRange"] is not tonemap
+        if tonemap is not ToneMap.ACES and tonemap is not ToneMap.PBR_NEUTRAL:
+            raise ValueError("Invalid value for tonemap")
+        self.configuration["HighDynamicRange"] = tonemap
         return self.reconfigure(fullrebuild, "HighDynamicRange")
 
     def delHighDynamicRange(self):
@@ -664,6 +741,8 @@ class CommonFilters:
         return True
 
     #snake_case alias:
+    set_msaa = setMSAA
+    del_msaa = delMSAA
     del_cartoon_ink = delCartoonInk
     set_half_pixel_shift = setHalfPixelShift
     del_half_pixel_shift = delHalfPixelShift

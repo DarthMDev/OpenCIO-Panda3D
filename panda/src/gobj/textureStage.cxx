@@ -15,6 +15,7 @@
 #include "internalName.h"
 #include "bamReader.h"
 #include "bamWriter.h"
+#include "indent.h"
 
 using std::ostream;
 
@@ -220,16 +221,21 @@ compare_to(const TextureStage &other) const {
  * Writes the details of this stage
  */
 void TextureStage::
-write(ostream &out) const {
-  out << "TextureStage " << get_name() << ", sort = " << get_sort() << ", priority = " << get_priority() << "\n"
-      << "  texcoords = " << get_texcoord_name()->get_name()
-      << ", mode = " << get_mode() << ", color = " << get_color()
-      << ", scale = " << get_rgb_scale() << ", " << get_alpha_scale()
-      << ", saved_result = " << get_saved_result()
-      << ", tex_view_offset = " << get_tex_view_offset() << "\n";
+write(ostream &out, int indent_level) const {
+  indent(out, indent_level)
+    << "TextureStage " << get_name() << ", sort = " << get_sort()
+    << ", priority = " << get_priority() << "\n";
+
+  indent(out, indent_level)
+    << "  texcoords = " << get_texcoord_name()->get_name()
+    << ", mode = " << get_mode() << ", color = " << get_color()
+    << ", scale = " << get_rgb_scale() << ", " << get_alpha_scale()
+    << ", saved_result = " << get_saved_result()
+    << ", tex_view_offset = " << get_tex_view_offset() << "\n";
 
   if (get_mode() == M_combine) {
-    out << "  RGB combine mode =  " << get_combine_rgb_mode() << "\n";
+    indent(out, indent_level)
+      << "  RGB combine mode =  " << get_combine_rgb_mode() << "\n";
     if (get_num_combine_rgb_operands() >= 1) {
       out << "    0: " << get_combine_rgb_source0() << ", "
           << get_combine_rgb_operand0() << "\n";
@@ -242,7 +248,8 @@ write(ostream &out) const {
       out << "    2: " << get_combine_rgb_source2() << ", "
           << get_combine_rgb_operand2() << "\n";
     }
-    out << "  alpha combine mode =  " << get_combine_alpha_mode() << "\n";
+    indent(out, indent_level)
+      << "  alpha combine mode =  " << get_combine_alpha_mode() << "\n";
     if (get_num_combine_alpha_operands() >= 1) {
       out << "    0: " << get_combine_alpha_source0() << ", "
           << get_combine_alpha_operand0() << "\n";
@@ -339,14 +346,14 @@ operand_valid_for_alpha(TextureStage::CombineOperand co) {
  */
 void TextureStage::
 register_with_read_factory() {
-  BamReader::get_factory()->register_factory(get_class_type(), make_TextureStage);
+  BamReader::get_factory()->register_factory(get_class_type(), make_from_bam);
 }
 
 /**
  * Factory method to generate a TextureStage object
  */
-TypedWritable* TextureStage::
-make_TextureStage(const FactoryParams &params) {
+TypedWritable *TextureStage::
+make_from_bam(const FactoryParams &params) {
   DatagramIterator scan;
   BamReader *manager;
 

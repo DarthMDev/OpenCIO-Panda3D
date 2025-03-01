@@ -38,9 +38,10 @@ eglGraphicsBuffer(GraphicsEngine *engine, GraphicsPipe *pipe,
   DCAST_INTO_V(egl_pipe, _pipe);
   _pbuffer = EGL_NO_SURFACE;
 
-  // Since the pbuffer never gets flipped, we get screenshots from the same
-  // buffer we draw into.
-  _screenshot_buffer_type = _draw_buffer_type;
+  // EGL pbuffers only have a back buffer (see 2.2.2 in spec), and it is never
+  // flipped (eglSwapBuffers is a no-op).
+  _draw_buffer_type = RenderBuffer::T_back;
+  _screenshot_buffer_type = RenderBuffer::T_back;
 }
 
 /**
@@ -120,6 +121,30 @@ end_frame(FrameMode mode, Thread *current_thread) {
 }
 
 /**
+ *
+ */
+void eglGraphicsBuffer::
+set_size(int x, int y) {
+  nassertv_always(_gsg != nullptr);
+
+  if (_size.get_x() != x || _size.get_y() != y) {
+    eglDestroySurface(_egl_display, _pbuffer);
+
+    int attrib_list[] = {
+      EGL_WIDTH, x,
+      EGL_HEIGHT, y,
+      EGL_NONE
+    };
+
+    eglGraphicsStateGuardian *eglgsg;
+    DCAST_INTO_V(eglgsg, _gsg);
+    _pbuffer = eglCreatePbufferSurface(eglgsg->_egl_display, eglgsg->_fbconfig, attrib_list);
+  }
+
+  set_size_and_recalc(x, y);
+}
+
+/**
  * Closes the buffer right now.  Called from the window thread.
  */
 void eglGraphicsBuffer::
@@ -165,7 +190,8 @@ open_buffer() {
     // If the old gsg has the wrong pixel format, create a new one that shares
     // with the old gsg.
     DCAST_INTO_R(eglgsg, _gsg, false);
-    if (!eglgsg->get_fb_properties().subsumes(_fb_properties)) {
+    if (eglgsg->get_engine() != _engine ||
+        !eglgsg->get_fb_properties().subsumes(_fb_properties)) {
       eglgsg = new eglGraphicsStateGuardian(_engine, _pipe, eglgsg);
       eglgsg->choose_pixel_format(_fb_properties, egl_pipe, false, true, false);
       _gsg = eglgsg;

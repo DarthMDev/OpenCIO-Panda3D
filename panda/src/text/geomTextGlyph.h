@@ -30,9 +30,10 @@ public:
   GeomTextGlyph(const GeomVertexData *data);
   GeomTextGlyph(const GeomTextGlyph &copy);
   GeomTextGlyph(const Geom &copy, const TextGlyph *glyph);
-  void operator = (const GeomTextGlyph &copy);
   virtual ~GeomTextGlyph();
   ALLOC_DELETED_CHAIN(GeomTextGlyph);
+
+  void operator = (const GeomTextGlyph &copy) = delete;
 
   virtual Geom *make_copy() const;
   virtual bool copy_primitives_from(const Geom *other);
@@ -51,7 +52,7 @@ private:
 
 public:
   static void register_with_read_factory();
-  static TypedWritable *make_GeomTextGlyph(const FactoryParams &params);
+  static TypedWritable *make_from_bam(const FactoryParams &params);
 
 PUBLISHED:
   static TypeHandle get_class_type() {

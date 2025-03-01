@@ -44,7 +44,6 @@
 #include "bitMask.h"
 #include "texture.h"
 #include "occlusionQueryContext.h"
-#include "timerQueryContext.h"
 #include "loader.h"
 #include "shaderAttrib.h"
 #include "texGenAttrib.h"
@@ -115,6 +114,7 @@ PUBLISHED:
   GraphicsEngine *get_engine() const;
   INLINE const GraphicsThreadingModel &get_threading_model() const;
   MAKE_PROPERTY(pipe, get_pipe);
+  MAKE_PROPERTY(engine, get_engine);
 
   INLINE bool is_hardware() const;
   virtual INLINE bool prefers_triangle_strips() const;
@@ -176,6 +176,12 @@ PUBLISHED:
   INLINE int get_maximum_simultaneous_render_targets() const;
   INLINE bool get_supports_dual_source_blending() const;
 
+public:
+  INLINE LVecBase3i get_max_compute_work_group_count() const;
+  INLINE LVecBase3i get_max_compute_work_group_size() const;
+  INLINE int get_max_compute_work_group_invocations() const;
+
+PUBLISHED:
   MAKE_PROPERTY(max_vertices_per_array, get_max_vertices_per_array);
   MAKE_PROPERTY(max_vertices_per_primitive, get_max_vertices_per_primitive);
   MAKE_PROPERTY(max_texture_stages, get_max_texture_stages);
@@ -222,6 +228,9 @@ PUBLISHED:
   MAKE_PROPERTY(timer_queries_active, get_timer_queries_active);
   MAKE_PROPERTY(max_color_targets, get_max_color_targets);
   MAKE_PROPERTY(supports_dual_source_blending, get_supports_dual_source_blending);
+  MAKE_PROPERTY(max_compute_work_group_count, get_max_compute_work_group_count);
+  MAKE_PROPERTY(max_compute_work_group_size, get_max_compute_work_group_size);
+  MAKE_PROPERTY(max_compute_work_group_invocations, get_max_compute_work_group_invocations);
 
   INLINE ShaderModel get_shader_model() const;
   INLINE void set_shader_model(ShaderModel shader_model);
@@ -255,7 +264,7 @@ PUBLISHED:
   MAKE_PROPERTY(texture_quality_override, get_texture_quality_override,
                                           set_texture_quality_override);
 
-  EXTENSION(PyObject *get_prepared_textures() const);
+  PY_EXTENSION(PyObject *get_prepared_textures() const);
   typedef bool TextureCallback(TextureContext *tc, void *callback_arg);
   void traverse_prepared_textures(TextureCallback *func, void *callback_arg);
 
@@ -264,7 +273,7 @@ PUBLISHED:
   void clear_flash_texture();
   Texture *get_flash_texture() const;
   MAKE_PROPERTY(flash_texture, get_flash_texture, set_flash_texture);
-#endif
+#endif // !NDEBUG || !CPPPARSER
 
 PUBLISHED:
   virtual bool has_extension(const std::string &extension) const;
@@ -290,8 +299,9 @@ PUBLISHED:
   MAKE_PROPERTY(scene, get_scene, set_scene);
 
 public:
-  virtual TextureContext *prepare_texture(Texture *tex, int view);
+  virtual TextureContext *prepare_texture(Texture *tex);
   virtual bool update_texture(TextureContext *tc, bool force);
+  virtual bool update_texture(TextureContext *tc, bool force, CompletionToken token);
   virtual void release_texture(TextureContext *tc);
   virtual void release_textures(const pvector<TextureContext *> &contexts);
   virtual bool extract_texture_data(Texture *tex);
@@ -316,11 +326,13 @@ public:
   virtual BufferContext *prepare_shader_buffer(ShaderBuffer *data);
   virtual void release_shader_buffer(BufferContext *ibc);
   virtual void release_shader_buffers(const pvector<BufferContext *> &contexts);
+  virtual bool extract_shader_buffer_data(ShaderBuffer *buffer, vector_uchar &data);
 
   virtual void begin_occlusion_query();
   virtual PT(OcclusionQueryContext) end_occlusion_query();
 
-  virtual PT(TimerQueryContext) issue_timer_query(int pstats_index);
+  virtual void issue_timer_query(int pstats_index);
+  virtual void issue_latency_query(int pstats_index);
 
   virtual void dispatch_compute(int size_x, int size_y, int size_z);
 
@@ -336,12 +348,14 @@ public:
 
   virtual void clear(DrawableRegion *clearable);
 
-  void update_shader_matrix_cache(Shader *shader, LMatrix4 *cache, int altered);
-  const LMatrix4 *fetch_specified_value(Shader::ShaderMatSpec &spec, const LMatrix4 *cache, int altered);
+  void update_shader_matrix_cache(Shader *shader, LVecBase4f *cache, int altered);
+  const LVecBase4f *fetch_specified_value(Shader::ShaderMatSpec &spec, const LVecBase4f *cache, LVecBase4f *scratch);
+  const void *fetch_ptr_parameter(Shader::ShaderMatSpec &spec, LVecBase4f *scratch);
   void fetch_specified_part(Shader::ShaderMatInput input, InternalName *name,
-                            LMatrix4 *into, int count = 1);
+                            LVecBase4f *into, int count = 1);
   void fetch_specified_member(const NodePath &np, CPT_InternalName member,
-                              LMatrix4 &t);
+                              LVecBase4f &v);
+  void fetch_specified_light(const NodePath &np, LVecBase4f *into);
   PT(Texture) fetch_specified_texture(Shader::ShaderTexSpec &spec,
                                       SamplerState &sampler, int &view);
   const Shader::ShaderPtrData *fetch_ptr_parameter(const Shader::ShaderPtrSpec& spec);
@@ -362,8 +376,6 @@ PUBLISHED:
   virtual void end_scene();
 public:
   virtual void end_frame(Thread *current_thread);
-
-  void flush_timer_queries();
 
   void set_current_properties(const FrameBufferProperties *properties);
 
@@ -426,7 +438,8 @@ public:
   virtual bool framebuffer_copy_to_texture
   (Texture *tex, int view, int z, const DisplayRegion *dr, const RenderBuffer &rb);
   virtual bool framebuffer_copy_to_ram
-  (Texture *tex, int view, int z, const DisplayRegion *dr, const RenderBuffer &rb);
+  (Texture *tex, int view, int z, const DisplayRegion *dr, const RenderBuffer &rb,
+   ScreenshotRequest *request = nullptr);
 
   virtual void bind_light(PointLight *light_obj, const NodePath &light,
                           int light_id);
@@ -445,7 +458,8 @@ public:
 
 #ifdef DO_PSTATS
   static void init_frame_pstats();
-#endif
+  PStatThread get_pstats_thread();
+#endif // DO_PSTATS
 
 protected:
   virtual void reissue_transforms();
@@ -602,14 +616,7 @@ protected:
 #ifdef DO_PSTATS
   int _pstats_gpu_thread;
   bool _timer_queries_active;
-  PStatFrameData _pstats_gpu_data;
-
-  int _last_query_frame;
-  int _last_num_queried;
-  // double _timer_delta;
-  typedef pdeque<PT(TimerQueryContext)> TimerQueryQueue;
-  TimerQueryQueue _pending_timer_queries;
-#endif
+#endif // DO_PSTATS
 
   bool _copy_texture_inverted;
   bool _supports_multisample;
@@ -622,11 +629,14 @@ protected:
   bool _supports_basic_shaders;
   bool _supports_geometry_shaders;
   bool _supports_tessellation_shaders;
-  bool _supports_compute_shaders;
   bool _supports_glsl;
   bool _supports_hlsl;
   bool _supports_framebuffer_multisample;
   bool _supports_framebuffer_blit;
+
+  LVecBase3i _max_compute_work_group_count;
+  LVecBase3i _max_compute_work_group_size;
+  int _max_compute_work_group_invocations;
 
   bool _supports_stencil;
   bool _supports_stencil_wrap;
@@ -658,15 +668,15 @@ protected:
 
 #ifndef NDEBUG
   PT(Texture) _flash_texture;
-#else
+#else // !NDEBUG
   PT(Texture) _flash_texture_unused;
-#endif
+#endif // !NDEBUG
 
 public:
   // Statistics
-  static PStatCollector _vertex_buffer_switch_pcollector;
-  static PStatCollector _index_buffer_switch_pcollector;
-  static PStatCollector _shader_buffer_switch_pcollector;
+  //static PStatCollector _vertex_buffer_switch_pcollector;
+  //static PStatCollector _index_buffer_switch_pcollector;
+  //static PStatCollector _shader_buffer_switch_pcollector;
   static PStatCollector _load_vertex_buffer_pcollector;
   static PStatCollector _load_index_buffer_pcollector;
   static PStatCollector _load_shader_buffer_pcollector;
@@ -696,10 +706,10 @@ public:
   static PStatCollector _draw_set_state_pcollector;
   static PStatCollector _flush_pcollector;
   static PStatCollector _compute_dispatch_pcollector;
+  static PStatCollector _compute_work_groups_pcollector;
   static PStatCollector _wait_occlusion_pcollector;
   static PStatCollector _wait_timer_pcollector;
   static PStatCollector _timer_queries_pcollector;
-  static PStatCollector _command_latency_pcollector;
 
   static PStatCollector _prepare_pcollector;
   static PStatCollector _prepare_texture_pcollector;
@@ -772,4 +782,4 @@ EXPCL_PANDA_DISPLAY std::ostream &operator << (std::ostream &out, GraphicsStateG
 
 #include "graphicsStateGuardian.I"
 
-#endif
+#endif // !GRAPHICSSTATEGUARDIAN_H

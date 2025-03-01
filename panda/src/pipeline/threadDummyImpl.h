@@ -31,6 +31,11 @@ class Thread;
 #include <windows.h>  // For Sleep().
 #endif
 
+#ifdef ANDROID
+#include <jni.h>
+typedef struct _JNIEnv _jni_env;
+#endif
+
 /**
  * A fake thread implementation for single-threaded applications.  This simply
  * fails whenever you try to start a thread.
@@ -50,13 +55,26 @@ public:
   INLINE static void prepare_for_exit();
 
   static Thread *get_current_thread();
-  INLINE static void bind_thread(Thread *thread);
+  INLINE static Thread *bind_thread(Thread *thread);
   INLINE static bool is_threading_supported();
   INLINE static bool is_true_threads();
   INLINE static bool is_simple_threads();
   INLINE static void sleep(double seconds);
   INLINE static void yield();
   INLINE static void consider_yield();
+
+#ifdef ANDROID
+  INLINE JNIEnv *get_jni_env() const;
+  bool attach_java_vm();
+  static void bind_java_thread();
+#endif
+
+  INLINE static bool get_context_switches(size_t &, size_t &);
+
+private:
+#ifdef ANDROID
+  JNIEnv *_jni_env = nullptr;
+#endif
 };
 
 #include "threadDummyImpl.I"

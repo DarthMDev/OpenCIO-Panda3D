@@ -28,6 +28,7 @@
 #include "config_pgraph.h"
 #include "depthOffsetAttrib.h"
 #include "colorBlendAttrib.h"
+#include "shaderAttrib.h"
 
 TypeHandle CullResult::_type_handle;
 
@@ -60,6 +61,8 @@ CullResult(GraphicsStateGuardianBase *gsg,
   _gsg(gsg),
   _draw_region_pcollector(draw_region_pcollector)
 {
+  _page = &_first_page;
+
 #ifdef DO_MEMORY_USAGE
   MemoryUsage::update_type(this, get_class_type());
 #endif
@@ -99,13 +102,13 @@ make_next() const {
  * the owner of the object pointer, and will eventually delete it.
  */
 void CullResult::
-add_object(CullableObject *object, const CullTraverser *traverser) {
+add_object(CullableObject &&object, const CullTraverser *traverser) {
   static const LColor flash_alpha_color(0.92, 0.96, 0.10, 1.0f);
   static const LColor flash_binary_color(0.21f, 0.67f, 0.24, 1.0f);
   static const LColor flash_multisample_color(0.78f, 0.05f, 0.81f, 1.0f);
   static const LColor flash_dual_color(0.92, 0.01f, 0.01f, 1.0f);
 
-  nassertv(object->_draw_callback != nullptr || object->_geom != nullptr);
+  nassertv(object._draw_callback != nullptr || object._geom != nullptr);
 
   bool force = !traverser->get_effective_incomplete_render();
   Thread *current_thread = traverser->get_current_thread();
@@ -113,60 +116,58 @@ add_object(CullableObject *object, const CullTraverser *traverser) {
 
   // This is probably a good time to check for an auto rescale setting.
   const RescaleNormalAttrib *rescale;
-  object->_state->get_attrib_def(rescale);
+  object._state->get_attrib_def(rescale);
   if (rescale->get_mode() == RescaleNormalAttrib::M_auto) {
     RescaleNormalAttrib::Mode mode;
 
-    if (object->_internal_transform->has_identity_scale()) {
+    if (object._internal_transform->has_identity_scale()) {
       mode = RescaleNormalAttrib::M_none;
-    } else if (object->_internal_transform->has_uniform_scale()) {
+    } else if (object._internal_transform->has_uniform_scale()) {
       mode = RescaleNormalAttrib::M_rescale;
     } else {
       mode = RescaleNormalAttrib::M_normalize;
     }
 
-    object->_state = object->_state->compose(get_rescale_normal_state(mode));
+    object._state = object._state->compose(get_rescale_normal_state(mode));
   }
 
   // Check for a special wireframe setting.
   const RenderModeAttrib *rmode;
-  if (object->_state->get_attrib(rmode)) {
+  if (object._state->get_attrib(rmode)) {
     if (rmode->get_mode() == RenderModeAttrib::M_filled_wireframe) {
       CullableObject *wireframe_part = object->make_copy();
       wireframe_part->_state = get_wireframe_overlay_state(rmode);
 
-      if (wireframe_part->munge_geom
-          (_gsg, _gsg->get_geom_munger(wireframe_part->_state, current_thread),
+      if (wireframe_part.munge_geom
+          (_gsg, _gsg->get_geom_munger(wireframe_part._state, current_thread),
            traverser, force)) {
         int wireframe_bin_index = bin_manager->find_bin("fixed");
         CullBin *bin = get_bin(wireframe_bin_index);
         nassertv(bin != nullptr);
-        check_flash_bin(wireframe_part->_state, bin_manager, wireframe_bin_index);
-        bin->add_object(wireframe_part, current_thread);
-      } else {
-        delete wireframe_part;
+        check_flash_bin(wireframe_part._state, bin_manager, wireframe_bin_index);
+        bin->add_object(alloc_object(std::move(wireframe_part)), current_thread);
       }
 
-      object->_state = object->_state->compose(get_wireframe_filled_state());
+      object._state = object._state->compose(get_wireframe_filled_state());
     }
   }
 
   // Check to see if there's a special transparency setting.
   const TransparencyAttrib *trans;
-  if (object->_state->get_attrib(trans)) {
+  if (object._state->get_attrib(trans)) {
     switch (trans->get_mode()) {
     case TransparencyAttrib::M_alpha:
     case TransparencyAttrib::M_premultiplied_alpha:
       // M_alpha implies an alpha-write test, so we don't waste time writing
       // 0-valued pixels.
-      object->_state = object->_state->compose(get_alpha_state());
-      check_flash_transparency(object->_state, flash_alpha_color);
+      object._state = object._state->compose(get_alpha_state());
+      check_flash_transparency(object._state, flash_alpha_color);
       break;
 
     case TransparencyAttrib::M_binary:
       // M_binary is implemented by explicitly setting the alpha test.
-      object->_state = object->_state->compose(get_binary_state());
-      check_flash_transparency(object->_state, flash_binary_color);
+      object._state = object._state->compose(get_binary_state());
+      check_flash_transparency(object._state, flash_binary_color);
       break;
 
     case TransparencyAttrib::M_multisample:
@@ -174,14 +175,14 @@ add_object(CullableObject *object, const CullTraverser *traverser) {
       // The multisample modes are implemented using M_binary if the GSG in
       // use doesn't support multisample.
       if (!_gsg->get_supports_multisample()) {
-        object->_state = object->_state->compose(get_binary_state());
+        object._state = object._state->compose(get_binary_state());
       }
-      check_flash_transparency(object->_state, flash_multisample_color);
+      check_flash_transparency(object._state, flash_multisample_color);
       break;
 
     case TransparencyAttrib::M_dual:
 #ifndef NDEBUG
-      check_flash_transparency(object->_state, flash_dual_color);
+      check_flash_transparency(object._state, flash_dual_color);
 #endif
       if (!m_dual) {
         // If m_dual is configured off, it becomes M_alpha.
@@ -195,7 +196,7 @@ add_object(CullableObject *object, const CullTraverser *traverser) {
       // falls back to M_alpha.
       {
         const CullBinAttrib *bin_attrib;
-        if (!object->_state->get_attrib(bin_attrib) ||
+        if (!object._state->get_attrib(bin_attrib) ||
             bin_attrib->get_bin_name().empty()) {
           // We make a copy of the object to draw the transparent part; this
           // gets placed in the transparent bin.
@@ -205,26 +206,23 @@ add_object(CullableObject *object, const CullTraverser *traverser) {
             {
               CullableObject *transparent_part = object->make_copy();
               CPT(RenderState) transparent_state = get_dual_transparent_state();
-              transparent_part->_state = object->_state->compose(transparent_state);
-              if (transparent_part->munge_geom
-                  (_gsg, _gsg->get_geom_munger(transparent_part->_state, current_thread),
+              transparent_part._state = object._state->compose(transparent_state);
+              if (transparent_part.munge_geom
+                  (_gsg, _gsg->get_geom_munger(transparent_part._state, current_thread),
                    traverser, force)) {
-                int transparent_bin_index = transparent_part->_state->get_bin_index();
+                int transparent_bin_index = transparent_part._state->get_bin_index();
                 CullBin *bin = get_bin(transparent_bin_index);
                 nassertv(bin != nullptr);
-                check_flash_bin(transparent_part->_state, bin_manager, transparent_bin_index);
-                bin->add_object(transparent_part, current_thread);
-              } else {
-                delete transparent_part;
+                check_flash_bin(transparent_part._state, bin_manager, transparent_bin_index);
+                bin->add_object(alloc_object(std::move(transparent_part)), current_thread);
               }
             }
 
           // Now we can draw the opaque part.  This will end up in the opaque
           // bin.
-          object->_state = object->_state->compose(get_dual_opaque_state());
+          object._state = object._state->compose(get_dual_opaque_state());
 #ifndef NDEBUG
           if (!m_dual_opaque) {
-            delete object;
             return;
           }
 #endif
@@ -239,20 +237,18 @@ add_object(CullableObject *object, const CullTraverser *traverser) {
     }
   }
 
-  int bin_index = object->_state->get_bin_index();
+  int bin_index = object._state->get_bin_index();
   CullBin *bin = get_bin(bin_index);
   nassertv(bin != nullptr);
-  check_flash_bin(object->_state, bin_manager, bin_index);
+  check_flash_bin(object._state, bin_manager, bin_index);
 
   // Munge vertices as needed for the GSG's requirements, and the object's
   // current state.
-  if (object->munge_geom(_gsg, _gsg->get_geom_munger(object->_state, current_thread), traverser, force)) {
+  if (object.munge_geom(_gsg, _gsg->get_geom_munger(object._state, current_thread), traverser, force)) {
     // The object may or may not now be fully resident, but this may not
     // matter, since the GSG may have the necessary buffers already loaded.
     // We'll let the GSG ultimately decide whether to render it.
-    bin->add_object(object, current_thread);
-  } else {
-    delete object;
+    bin->add_object(alloc_object(std::move(object)), current_thread);
   }
 }
 
@@ -366,6 +362,33 @@ make_new_bin(int bin_index) {
   }
 
   return bin_ptr;
+}
+
+/**
+ * Creates a new AllocationPage replacing the old one.
+ */
+CullResult::AllocationPage *CullResult::
+new_page() {
+  AllocationPage *page = new AllocationPage;
+  page->_next = _page;
+  _page = page;
+  return page;
+}
+
+/**
+ *
+ */
+void CullResult::
+delete_page(AllocationPage *page) {
+  size_t size = std::exchange(page->_size, 0);
+  for (size_t i = 0; i < size; ++i) {
+    ((CullableObject *)page->_memory)[i].~CullableObject();
+  }
+  AllocationPage *next = page->_next;
+  if (next != nullptr) {
+    delete_page(next);
+    delete page;
+  }
 }
 
 /**
@@ -521,13 +544,36 @@ get_wireframe_filled_state() {
  */
 CPT(RenderState) CullResult::
 get_wireframe_overlay_state(const RenderModeAttrib *rmode) {
-  return RenderState::make(
+  return get_wireframe_overlay_state(rmode, nullptr);
+}
+
+/**
+ * Returns a RenderState that renders only the wireframe part of an
+ * M_filled_wireframe model.
+ * If a shader attrib is provided, a constant color is used in ColorBlendAttrib
+ * to emulate the flat color.
+ */
+CPT(RenderState) CullResult::
+get_wireframe_overlay_state(const RenderModeAttrib *rmode, const ShaderAttrib *shader) {
+  CPT(RenderState) state = RenderState::make(
     DepthOffsetAttrib::make(1, 0, 0.99999f),
-    ColorAttrib::make_flat(rmode->get_wireframe_color()),
-    ColorBlendAttrib::make(ColorBlendAttrib::M_add,
-                           ColorBlendAttrib::O_incoming_alpha,
-                           ColorBlendAttrib::O_one_minus_incoming_alpha),
     RenderModeAttrib::make(RenderModeAttrib::M_wireframe,
                            rmode->get_thickness(),
                            rmode->get_perspective()));
+  if (filled_wireframe_apply_shader) {
+    state = state->add_attrib(ColorBlendAttrib::make(ColorBlendAttrib::M_add,
+                                                     ColorBlendAttrib::O_zero,
+                                                     ColorBlendAttrib::O_constant_color,
+                                                     ColorBlendAttrib::M_add,
+                                                     ColorBlendAttrib::O_one,
+                                                     ColorBlendAttrib::O_one_minus_incoming_alpha,
+                                                     rmode->get_wireframe_color()));
+    state = state->add_attrib(shader);
+  } else {
+    state = state->add_attrib(ColorBlendAttrib::make(ColorBlendAttrib::M_add,
+                                                     ColorBlendAttrib::O_incoming_alpha,
+                                                     ColorBlendAttrib::O_one_minus_incoming_alpha));
+    state = state->add_attrib(ColorAttrib::make_flat(rmode->get_wireframe_color()));
+  }
+  return state;
 }

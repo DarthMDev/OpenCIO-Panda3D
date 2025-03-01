@@ -63,15 +63,21 @@
   #include <sys/time.h>
 #endif
 
+#ifdef __APPLE__
+extern "C" {
+  void *objc_autoreleasePoolPush();
+  void objc_autoreleasePoolPop(void *);
+};
+#endif
+
 using std::string;
 
 PT(GraphicsEngine) GraphicsEngine::_global_ptr;
 
 PStatCollector GraphicsEngine::_wait_pcollector("Wait:Thread sync");
 PStatCollector GraphicsEngine::_cycle_pcollector("App:Cycle");
-PStatCollector GraphicsEngine::_app_pcollector("App:Show code:General");
+//PStatCollector GraphicsEngine::_app_pcollector("App:Show code:General");
 PStatCollector GraphicsEngine::_render_frame_pcollector("App:render_frame");
-PStatCollector GraphicsEngine::_do_frame_pcollector("*:do_frame");
 PStatCollector GraphicsEngine::_yield_pcollector("App:Yield");
 PStatCollector GraphicsEngine::_cull_pcollector("Cull");
 PStatCollector GraphicsEngine::_cull_setup_pcollector("Cull:Setup");
@@ -79,15 +85,12 @@ PStatCollector GraphicsEngine::_cull_sort_pcollector("Cull:Sort");
 PStatCollector GraphicsEngine::_draw_pcollector("Draw");
 PStatCollector GraphicsEngine::_sync_pcollector("Draw:Sync");
 PStatCollector GraphicsEngine::_flip_pcollector("Wait:Flip");
-PStatCollector GraphicsEngine::_flip_begin_pcollector("Wait:Flip:Begin");
-PStatCollector GraphicsEngine::_flip_end_pcollector("Wait:Flip:End");
 PStatCollector GraphicsEngine::_transform_states_pcollector("TransformStates");
 PStatCollector GraphicsEngine::_transform_states_unused_pcollector("TransformStates:Unused");
 PStatCollector GraphicsEngine::_render_states_pcollector("RenderStates");
 PStatCollector GraphicsEngine::_render_states_unused_pcollector("RenderStates:Unused");
 PStatCollector GraphicsEngine::_cyclers_pcollector("PipelineCyclers");
-PStatCollector GraphicsEngine::_dirty_cyclers_pcollector("Dirty PipelineCyclers");
-PStatCollector GraphicsEngine::_delete_pcollector("App:Delete");
+PStatCollector GraphicsEngine::_dirty_cyclers_pcollector("PipelineCyclers:Dirty");
 
 
 PStatCollector GraphicsEngine::_sw_sprites_pcollector("SW Sprites");
@@ -149,8 +152,9 @@ INLINE static bool operator < (const CullKey &a, const CullKey &b) {
  * any Pipeline you choose.
  */
 GraphicsEngine::
-GraphicsEngine(Pipeline *pipeline) :
+GraphicsEngine(ClockObject *clock, Pipeline *pipeline) :
   _pipeline(pipeline),
+  _clock(clock),
   _app("app"),
   _lock("GraphicsEngine::_lock"),
   _loaded_textures_lock("GraphicsEngine::_loaded_textures_lock")
@@ -182,9 +186,9 @@ GraphicsEngine(Pipeline *pipeline) :
 GraphicsEngine::
 ~GraphicsEngine() {
 #ifdef DO_PSTATS
-  if (_app_pcollector.is_started()) {
-    _app_pcollector.stop();
-  }
+  //if (_app_pcollector.is_started()) {
+  //  _app_pcollector.stop();
+  //}
 #endif
 
   remove_all_windows();
@@ -192,7 +196,7 @@ GraphicsEngine::
 
 /**
  * Specifies how future objects created via make_gsg(), make_buffer(), and
- * make_window() will be threaded.  This does not affect any already-created
+ * make_output() will be threaded.  This does not affect any already-created
  * objects.
  */
 void GraphicsEngine::
@@ -336,7 +340,7 @@ make_output(GraphicsPipe *pipe,
   nassertr(pipe != nullptr, nullptr);
   if (gsg != nullptr) {
     nassertr(pipe == gsg->get_pipe(), nullptr);
-    nassertr(this == gsg->get_engine(), nullptr);
+    //nassertr(this == gsg->get_engine(), nullptr);
   }
 
   // Are we really asking for a callback window?
@@ -714,9 +718,9 @@ render_frame() {
   // to be App.
 #ifdef DO_PSTATS
   _render_frame_pcollector.start();
-  if (_app_pcollector.is_started()) {
-    _app_pcollector.stop();
-  }
+  //if (_app_pcollector.is_started()) {
+  //  _app_pcollector.stop();
+  //}
 #endif
 
   // Make sure our buffers and windows are fully realized before we render a
@@ -726,11 +730,9 @@ render_frame() {
   // been rendered).
   open_windows();
 
-  ClockObject *global_clock = ClockObject::get_global_clock();
-
   if (display_cat.is_spam()) {
     display_cat.spam()
-      << "render_frame() - frame " << global_clock->get_frame_count() << "\n";
+      << "render_frame() - frame " << _clock->get_frame_count() << "\n";
   }
 
   {
@@ -781,7 +783,7 @@ render_frame() {
         }
       }
     }
-    _windows.swap(new_windows);
+    _windows = std::move(new_windows);
 
     // Go ahead and release any textures' ram images for textures that were
     // drawn in the previous frame.
@@ -843,8 +845,8 @@ render_frame() {
     }
 #endif  // THREADED_PIPELINE
 
-    global_clock->tick(current_thread);
-    if (global_clock->check_errors(current_thread)) {
+    _clock->tick(current_thread);
+    if (_clock->check_errors(current_thread)) {
       throw_event("clock_error");
     }
 
@@ -854,6 +856,7 @@ render_frame() {
     // Reset our pcollectors that track data across the frame.
     CullTraverser::_nodes_pcollector.clear_level();
     CullTraverser::_geom_nodes_pcollector.clear_level();
+    CullTraverser::_pgui_nodes_pcollector.clear_level();
     CullTraverser::_geoms_pcollector.clear_level();
     GeomCacheManager::_geom_cache_active_pcollector.clear_level();
     GeomCacheManager::_geom_cache_record_pcollector.clear_level();
@@ -925,10 +928,14 @@ render_frame() {
     for (ti = _threads.begin(); ti != _threads.end(); ++ti) {
       RenderThread *thread = (*ti).second;
       if (thread->_thread_state == TS_wait) {
+        // Release before notifying, otherwise the other thread will wake up
+        // and get blocked on the mutex straight away.
         thread->_thread_state = TS_do_frame;
+        thread->_cv_mutex.release();
         thread->_cv_start.notify();
+      } else {
+        thread->_cv_mutex.release();
       }
-      thread->_cv_mutex.release();
     }
 
     // Some threads may still be drawing, so indicate that we have to wait for
@@ -950,7 +957,7 @@ render_frame() {
 
   // Anything that happens outside of GraphicsEngine::render_frame() is deemed
   // to be App.
-  _app_pcollector.start();
+  //_app_pcollector.start();
   _render_frame_pcollector.stop();
 }
 
@@ -968,7 +975,7 @@ open_windows() {
 
   ReMutexHolder holder(_lock, current_thread);
 
-  pvector<PT(GraphicsOutput)> new_windows;
+  NewWindows new_windows;
   {
     MutexHolder new_windows_holder(_new_windows_lock, current_thread);
     if (_new_windows.empty()) {
@@ -1015,7 +1022,7 @@ open_windows() {
     }
 
     // Steal the list, since remove_window() may remove from _new_windows.
-    new_windows.swap(_new_windows);
+    new_windows = std::move(_new_windows);
   }
 
   do_resort_windows();
@@ -1036,8 +1043,8 @@ open_windows() {
       }
 
       thread->_thread_state = TS_do_windows;
-      thread->_cv_start.notify();
       thread->_cv_mutex.release();
+      thread->_cv_start.notify();
     }
   }
 
@@ -1127,47 +1134,30 @@ flip_frame() {
  */
 bool GraphicsEngine::
 extract_texture_data(Texture *tex, GraphicsStateGuardian *gsg) {
-  ReMutexHolder holder(_lock);
-
-  string draw_name = gsg->get_threading_model().get_draw_name();
-  if (draw_name.empty()) {
-    // A single-threaded environment.  No problem.
+  return run_on_draw_thread([=] () {
     return gsg->extract_texture_data(tex);
+  });
+}
 
-  } else {
-    // A multi-threaded environment.  We have to wait until the draw thread
-    // has finished its current task.
-    WindowRenderer *wr = get_window_renderer(draw_name, 0);
-    RenderThread *thread = (RenderThread *)wr;
-    MutexHolder cv_holder(thread->_cv_mutex);
-
-    while (thread->_thread_state != TS_wait) {
-      thread->_cv_done.wait();
+/**
+ * Asks the indicated GraphicsStateGuardian to retrieve the buffer memory
+ * image of the indicated ShaderBuffer and return it.
+ *
+ * This is mainly useful for debugging.  It is a very slow call because it
+ * introduces a pipeline stall both of Panda's pipeline and the graphics
+ * pipeline.
+ *
+ * The return value is empty if some kind of error occurred.
+ */
+vector_uchar GraphicsEngine::
+extract_shader_buffer_data(ShaderBuffer *buffer, GraphicsStateGuardian *gsg) {
+  return run_on_draw_thread([=] () {
+    vector_uchar data;
+    if (!gsg->extract_shader_buffer_data(buffer, data)) {
+      data.clear();
     }
-
-    // Temporarily set this so that it accesses data from the current thread.
-    int pipeline_stage = Thread::get_current_pipeline_stage();
-    int draw_pipeline_stage = thread->get_pipeline_stage();
-    thread->set_pipeline_stage(pipeline_stage);
-
-    // Now that the draw thread is idle, signal it to do the extraction task.
-    thread->_gsg = gsg;
-    thread->_texture = tex;
-    thread->_thread_state = TS_do_extract;
-    thread->_cv_start.notify();
-    thread->_cv_mutex.release();
-    thread->_cv_mutex.acquire();
-
-    //XXX is this necessary, or is acquiring the mutex enough?
-    while (thread->_thread_state != TS_wait) {
-      thread->_cv_done.wait();
-    }
-
-    thread->set_pipeline_stage(draw_pipeline_stage);
-    thread->_gsg = nullptr;
-    thread->_texture = nullptr;
-    return thread->_result;
-  }
+    return data;
+  });
 }
 
 /**
@@ -1184,57 +1174,20 @@ extract_texture_data(Texture *tex, GraphicsStateGuardian *gsg) {
  * The return value is true if the operation is successful, false otherwise.
  */
 void GraphicsEngine::
-dispatch_compute(const LVecBase3i &work_groups, const ShaderAttrib *sattr, GraphicsStateGuardian *gsg) {
+dispatch_compute(const LVecBase3i &work_groups, const RenderState *state, GraphicsStateGuardian *gsg) {
+  const ShaderAttrib *sattr;
+  DCAST_INTO_V(sattr, state->get_attrib(ShaderAttrib::get_class_slot()));
+
   const Shader *shader = sattr->get_shader();
   nassertv(shader != nullptr);
   nassertv(gsg != nullptr);
 
-  ReMutexHolder holder(_lock);
-
-  CPT(RenderState) state = RenderState::make(sattr);
-
-  string draw_name = gsg->get_threading_model().get_draw_name();
-  if (draw_name.empty()) {
-    // A single-threaded environment.  No problem.
+  run_on_draw_thread([=] () {
     gsg->push_group_marker(std::string("Compute ") + shader->get_filename(Shader::ST_compute).get_basename());
     gsg->set_state_and_transform(state, TransformState::make_identity());
     gsg->dispatch_compute(work_groups[0], work_groups[1], work_groups[2]);
     gsg->pop_group_marker();
-
-  } else {
-    // A multi-threaded environment.  We have to wait until the draw thread
-    // has finished its current task.
-    WindowRenderer *wr = get_window_renderer(draw_name, 0);
-    RenderThread *thread = (RenderThread *)wr;
-    MutexHolder cv_holder(thread->_cv_mutex);
-
-    while (thread->_thread_state != TS_wait) {
-      thread->_cv_done.wait();
-    }
-
-    // Temporarily set this so that it accesses data from the current thread.
-    int pipeline_stage = Thread::get_current_pipeline_stage();
-    int draw_pipeline_stage = thread->get_pipeline_stage();
-    thread->set_pipeline_stage(pipeline_stage);
-
-    // Now that the draw thread is idle, signal it to do the compute task.
-    thread->_gsg = gsg;
-    thread->_state = state.p();
-    thread->_work_groups = work_groups;
-    thread->_thread_state = TS_do_compute;
-    thread->_cv_start.notify();
-    thread->_cv_mutex.release();
-    thread->_cv_mutex.acquire();
-
-    //XXX is this necessary, or is acquiring the mutex enough?
-    while (thread->_thread_state != TS_wait) {
-      thread->_cv_done.wait();
-    }
-
-    thread->set_pipeline_stage(draw_pipeline_stage);
-    thread->_gsg = nullptr;
-    thread->_state = nullptr;
-  }
+  });
 }
 
 /**
@@ -1268,43 +1221,6 @@ texture_uploaded(Texture *tex) {
   lt._tex = tex;
   lt._image_modified = tex->get_image_modified();
 // Usually only called by DisplayRegion::do_cull.
-}
-
-/**
- * Called by DisplayRegion::do_get_screenshot
- */
-PT(Texture) GraphicsEngine::
-do_get_screenshot(DisplayRegion *region, GraphicsStateGuardian *gsg) {
-  // A multi-threaded environment.  We have to wait until the draw thread
-  // has finished its current task.
-
-  ReMutexHolder holder(_lock);
-
-  const std::string &draw_name = gsg->get_threading_model().get_draw_name();
-  WindowRenderer *wr = get_window_renderer(draw_name, 0);
-  RenderThread *thread = (RenderThread *)wr;
-  MutexHolder cv_holder(thread->_cv_mutex);
-
-  while (thread->_thread_state != TS_wait) {
-    thread->_cv_done.wait();
-  }
-
-  // Now that the draw thread is idle, signal it to do the extraction task.
-  thread->_region = region;
-  thread->_thread_state = TS_do_screenshot;
-  thread->_cv_start.notify();
-  thread->_cv_mutex.release();
-  thread->_cv_mutex.acquire();
-
-  //XXX is this necessary, or is acquiring the mutex enough?
-  while (thread->_thread_state != TS_wait) {
-    thread->_cv_done.wait();
-  }
-
-  PT(Texture) tex = std::move(thread->_texture);
-  thread->_region = nullptr;
-  thread->_texture = nullptr;
-  return tex;
 }
 
 /**
@@ -1408,23 +1324,29 @@ cull_and_draw_together(GraphicsEngine::Windows wlist,
     GraphicsOutput *win = wlist[wi];
     if (win->is_active() && win->get_gsg()->is_active()) {
       if (win->flip_ready()) {
-        {
-          PStatTimer timer(GraphicsEngine::_flip_begin_pcollector, current_thread);
-          win->begin_flip();
+        if (display_cat.is_spam()) {
+          display_cat.spam()
+            << "Flipping window " << win->get_name() << "\n";
         }
-        {
-          PStatTimer timer(GraphicsEngine::_flip_end_pcollector, current_thread);
-          win->end_flip();
-        }
+        PStatTimer timer(_flip_pcollector, current_thread);
+        win->begin_flip();
+        win->end_flip();
       }
 
       if (win->begin_frame(GraphicsOutput::FM_render, current_thread)) {
+        win->copy_async_screenshot();
+
         if (win->is_any_clear_active()) {
           GraphicsStateGuardian *gsg = win->get_gsg();
           PStatGPUTimer timer(gsg, win->get_clear_window_pcollector(), current_thread);
           gsg->push_group_marker("Clear");
           win->clear(current_thread);
           gsg->pop_group_marker();
+        }
+
+        if (display_cat.is_spam()) {
+          display_cat.spam()
+            << "Culling and drawing window " << win->get_name() << "\n";
         }
 
         int num_display_regions = win->get_num_active_display_regions();
@@ -1438,14 +1360,13 @@ cull_and_draw_together(GraphicsEngine::Windows wlist,
 
         if (_auto_flip) {
           if (win->flip_ready()) {
-            {
-              PStatTimer timer(GraphicsEngine::_flip_begin_pcollector, current_thread);
-              win->begin_flip();
+            if (display_cat.is_spam()) {
+              display_cat.spam()
+                << "Flipping window " << win->get_name() << "\n";
             }
-            {
-              PStatTimer timer(GraphicsEngine::_flip_end_pcollector, current_thread);
-              win->end_flip();
-            }
+            PStatTimer timer(_flip_pcollector, current_thread);
+            win->begin_flip();
+            win->end_flip();
           }
         }
       }
@@ -1539,6 +1460,11 @@ cull_to_bins(GraphicsEngine::Windows wlist, Thread *current_thread) {
   for (size_t wi = 0; wi < wlist_size; ++wi) {
     GraphicsOutput *win = wlist[wi];
     if (win->is_active() && win->get_gsg()->is_active()) {
+      if (display_cat.is_spam()) {
+        display_cat.spam()
+          << "Culling window " << win->get_name() << "\n";
+      }
+
       GraphicsStateGuardian *gsg = win->get_gsg();
       PStatTimer timer(win->get_cull_window_pcollector(), current_thread);
       int num_display_regions = win->get_num_active_display_regions();
@@ -1683,6 +1609,8 @@ cull_to_bins(GraphicsOutput *win, GraphicsStateGuardian *gsg,
  */
 void GraphicsEngine::
 draw_bins(const GraphicsEngine::Windows &wlist, Thread *current_thread) {
+  PStatTimer timer(_draw_pcollector, current_thread);
+
   nassertv(wlist.verify_list());
 
   size_t wlist_size = wlist.size();
@@ -1694,16 +1622,14 @@ draw_bins(const GraphicsEngine::Windows &wlist, Thread *current_thread) {
 
       GraphicsOutput *host = win->get_host();
       if (host->flip_ready()) {
-        {
-          // We can't use a PStatGPUTimer before begin_frame, so when using
-          // GPU timing, it is advisable to set auto-flip to #t.
-          PStatTimer timer(GraphicsEngine::_flip_begin_pcollector, current_thread);
-          host->begin_flip();
+        if (display_cat.is_spam()) {
+          display_cat.spam()
+            << "Flipping window " << host->get_name()
+            << " before drawing window " << win->get_name() << "\n";
         }
-        {
-          PStatTimer timer(GraphicsEngine::_flip_end_pcollector, current_thread);
-          host->end_flip();
-        }
+        PStatTimer timer(_flip_pcollector, current_thread);
+        host->begin_flip();
+        host->end_flip();
       }
 
       if (win->begin_frame(GraphicsOutput::FM_render, current_thread)) {
@@ -1711,6 +1637,9 @@ draw_bins(const GraphicsEngine::Windows &wlist, Thread *current_thread) {
         // a current context for PStatGPUTimer to work.
         {
           PStatGPUTimer timer(gsg, win->get_draw_window_pcollector(), current_thread);
+
+          win->copy_async_screenshot();
+
           if (win->is_any_clear_active()) {
             PStatGPUTimer timer(gsg, win->get_clear_window_pcollector(), current_thread);
             win->get_gsg()->push_group_marker("Clear");
@@ -1733,24 +1662,14 @@ draw_bins(const GraphicsEngine::Windows &wlist, Thread *current_thread) {
         win->end_frame(GraphicsOutput::FM_render, current_thread);
 
         if (_auto_flip) {
-#ifdef DO_PSTATS
-          // This is a good time to perform a latency query.
-          if (gsg->get_timer_queries_active()) {
-            gsg->issue_timer_query(GraphicsStateGuardian::_command_latency_pcollector.get_index());
-          }
-#endif
-
           if (win->flip_ready()) {
-            {
-              // begin_flip doesn't do anything interesting, let's not waste
-              // two timer queries on that.
-              PStatTimer timer(GraphicsEngine::_flip_begin_pcollector, current_thread);
-              win->begin_flip();
+            if (display_cat.is_spam()) {
+              display_cat.spam()
+                << "Flipping window " << win->get_name() << "\n";
             }
-            {
-              PStatGPUTimer timer(gsg, GraphicsEngine::_flip_end_pcollector, current_thread);
-              win->end_flip();
-            }
+            PStatGPUTimer timer(gsg, _flip_pcollector, current_thread);
+            win->begin_flip();
+            win->end_flip();
           }
         }
 
@@ -1812,22 +1731,27 @@ flip_windows(const GraphicsEngine::Windows &wlist, Thread *current_thread) {
   size_t warray_count = 0;
   GraphicsOutput **warray = (GraphicsOutput **)alloca(warray_size);
 
+  PStatTimer timer(_flip_pcollector, current_thread);
+
   size_t i;
   for (i = 0; i < num_windows; ++i) {
     GraphicsOutput *win = wlist[i];
     if (win->flip_ready()) {
+      if (display_cat.is_spam()) {
+        display_cat.spam()
+          << "Flipping window " << win->get_name() << "\n";
+      }
+
       nassertv(warray_count < num_windows);
       warray[warray_count] = win;
       ++warray_count;
 
-      PStatTimer timer(GraphicsEngine::_flip_begin_pcollector, current_thread);
       win->begin_flip();
     }
   }
 
   for (i = 0; i < warray_count; ++i) {
     GraphicsOutput *win = warray[i];
-    PStatTimer timer(GraphicsEngine::_flip_end_pcollector, current_thread);
     win->end_flip();
   }
 }
@@ -1843,7 +1767,7 @@ ready_flip_windows(const GraphicsEngine::Windows &wlist, Thread *current_thread)
   for (wi = wlist.begin(); wi != wlist.end(); ++wi) {
     GraphicsOutput *win = (*wi);
     if (win->flip_ready()) {
-      PStatTimer timer(GraphicsEngine::_flip_begin_pcollector, current_thread);
+      PStatTimer timer(_flip_pcollector, current_thread);
       win->ready_flip();
     }
   }
@@ -1937,8 +1861,8 @@ do_flip_frame(Thread *current_thread) {
       RenderThread *thread = (*ti).second;
       nassertv(thread->_thread_state == TS_wait);
       thread->_thread_state = TS_do_flip;
-      thread->_cv_start.notify();
       thread->_cv_mutex.release();
+      thread->_cv_start.notify();
     }
   }
 
@@ -2154,7 +2078,7 @@ do_draw(GraphicsOutput *win, GraphicsStateGuardian *gsg, DisplayRegion *dr, Thre
 }
 
 /**
- * An internal function called by make_window() and make_buffer() and similar
+ * An internal function called by make_output() and make_buffer() and similar
  * functions to add the newly-created GraphicsOutput object to the engine's
  * list of windows, and to request that the window be opened.
  */
@@ -2244,6 +2168,11 @@ do_remove_window(GraphicsOutput *window, Thread *current_thread) {
 void GraphicsEngine::
 do_resort_windows() {
   _windows_sorted = true;
+
+  if (display_cat.is_spam()) {
+    display_cat.spam()
+      << "Re-sorting window list.\n";
+  }
 
   _app.resort_windows();
   Threads::const_iterator ti;
@@ -2365,8 +2294,8 @@ terminate_threads(Thread *current_thread) {
   for (ti = _threads.begin(); ti != _threads.end(); ++ti) {
     RenderThread *thread = (*ti).second;
     thread->_thread_state = TS_terminate;
-    thread->_cv_start.notify();
     thread->_cv_mutex.release();
+    thread->_cv_start.notify();
   }
 
   // Finally, wait for them all to finish cleaning up.
@@ -2569,13 +2498,29 @@ resort_windows() {
  */
 void GraphicsEngine::WindowRenderer::
 do_frame(GraphicsEngine *engine, Thread *current_thread) {
-  PStatTimer timer(engine->_do_frame_pcollector, current_thread);
   LightReMutexHolder holder(_wl_lock);
 
-  engine->cull_to_bins(_cull, current_thread);
-  engine->cull_and_draw_together(_cdraw, current_thread);
-  engine->draw_bins(_draw, current_thread);
-  engine->process_events(_window, current_thread);
+#ifdef __APPLE__
+  // Enclose the entire frame in an autorelease pool.
+  void *pool = objc_autoreleasePoolPush();
+#endif
+
+  if (!_cull.empty()) {
+    engine->cull_to_bins(_cull, current_thread);
+  }
+  if (!_cdraw.empty()) {
+    engine->cull_and_draw_together(_cdraw, current_thread);
+  }
+  if (!_draw.empty()) {
+    engine->draw_bins(_draw, current_thread);
+  }
+  if (!_window.empty()) {
+    engine->process_events(_window, current_thread);
+  }
+
+#ifdef __APPLE__
+  objc_autoreleasePoolPop(pool);
+#endif
 
   // If any GSG's on the list have no more outstanding pointers, clean them
   // up.  (We are in the draw thread for all of these GSG's.)
@@ -2608,10 +2553,18 @@ void GraphicsEngine::WindowRenderer::
 do_windows(GraphicsEngine *engine, Thread *current_thread) {
   LightReMutexHolder holder(_wl_lock);
 
+#ifdef __APPLE__
+  void *pool = objc_autoreleasePoolPush();
+#endif
+
   engine->process_events(_window, current_thread);
 
   engine->make_contexts(_cdraw, current_thread);
   engine->make_contexts(_draw, current_thread);
+
+#ifdef __APPLE__
+  objc_autoreleasePoolPop(pool);
+#endif
 }
 
 /**
@@ -2758,26 +2711,9 @@ thread_main() {
       do_pending(_engine, current_thread);
       break;
 
-    case TS_do_compute:
-      nassertd(_gsg != nullptr && _state != nullptr) break;
-      {
-        const ShaderAttrib *sattr;
-        _state->get_attrib(sattr);
-        _gsg->push_group_marker(std::string("Compute ") + sattr->get_shader()->get_filename(Shader::ST_compute).get_basename());
-        _gsg->set_state_and_transform(_state, TransformState::make_identity());
-        _gsg->dispatch_compute(_work_groups[0], _work_groups[1], _work_groups[2]);
-        _gsg->pop_group_marker();
-      }
-      break;
-
-    case TS_do_extract:
-      nassertd(_gsg != nullptr && _texture != nullptr) break;
-      _result = _gsg->extract_texture_data(_texture);
-      break;
-
-    case TS_do_screenshot:
-      nassertd(_region != nullptr) break;
-      _texture = _region->get_screenshot();
+    case TS_callback:
+      nassertd(_callback != nullptr) break;
+      _callback(this);
       break;
 
     case TS_terminate:
@@ -2801,4 +2737,40 @@ thread_main() {
       _cv_start.wait();
     }
   }
+}
+
+/**
+ * Waits for this thread to become idle, then runs the given function on it.
+ */
+void GraphicsEngine::RenderThread::
+run_on_thread(Callback *callback, void *callback_data, void *return_data) {
+  MutexHolder cv_holder(_cv_mutex);
+
+  while (_thread_state != TS_wait) {
+    _cv_done.wait();
+  }
+
+  // Temporarily set this so that it accesses data from the current thread.
+  int pipeline_stage = Thread::get_current_pipeline_stage();
+  int thread_pipeline_stage = get_pipeline_stage();
+  set_pipeline_stage(pipeline_stage);
+
+  // Now that the draw thread is idle, signal it to run the callback.
+  _callback = callback;
+  _callback_data = callback_data;
+  _return_data = return_data;
+  _thread_state = TS_callback;
+  _cv_mutex.release();
+  _cv_start.notify();
+  _cv_mutex.acquire();
+
+  // Wait for it to finish the job.
+  while (_thread_state != TS_wait) {
+    _cv_done.wait();
+  }
+
+  set_pipeline_stage(thread_pipeline_stage);
+  _callback = nullptr;
+  _callback_data = nullptr;
+  _return_data = nullptr;
 }

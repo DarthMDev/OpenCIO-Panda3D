@@ -208,7 +208,6 @@ matches_magic_number(const string &magic_number) const {
  */
 PNMReader *PNMFileTypeStbImage::
 make_reader(istream *file, bool owns_file, const string &magic_number) {
-  init_pnm();
   return new StbImageReader(this, file, owns_file, magic_number);
 }
 
@@ -588,7 +587,7 @@ read_data(xel *array, xelval *alpha) {
 void PNMFileTypeStbImage::
 register_with_read_factory() {
   BamReader::get_factory()->
-    register_factory(get_class_type(), make_PNMFileTypeStbImage);
+    register_factory(get_class_type(), make_from_bam);
 }
 
 /**
@@ -600,7 +599,7 @@ register_with_read_factory() {
  * we just pull the object from the registry.
  */
 TypedWritable *PNMFileTypeStbImage::
-make_PNMFileTypeStbImage(const FactoryParams &params) {
+make_from_bam(const FactoryParams &params) {
   return PNMFileTypeRegistry::get_global_ptr()->get_type_by_handle(get_class_type());
 }
 

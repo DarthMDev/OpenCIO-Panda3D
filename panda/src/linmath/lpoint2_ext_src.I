@@ -16,11 +16,19 @@
  */
 INLINE_LINMATH std::string Extension<FLOATNAME(LPoint2)>::
 __repr__() const {
-  std::ostringstream out;
-  out << "LPoint2" << FLOATTOKEN << "("
-      << MAYBE_ZERO(_this->_v(0)) << ", "
-      << MAYBE_ZERO(_this->_v(1)) << ")";
-  return out.str();
+  char buf[96] = "LPoint2";
+  char *p = buf + strlen(buf);
+  *(p++) = FLOATTOKEN;
+  *(p++) = '(';
+  FLOATTYPE_REPR(_this->_v(0), p);
+  p += strlen(p);
+  *(p++) = ',';
+  *(p++) = ' ';
+  FLOATTYPE_REPR(_this->_v(1), p);
+  p += strlen(p);
+  *(p++) = ')';
+  *p = '\0';
+  return std::string(buf, p - buf);
 }
 
 /**
@@ -78,4 +86,12 @@ INLINE_LINMATH int Extension<FLOATNAME(LPoint2)>::
 __setattr__(PyObject *self, const std::string &attr_name, PyObject *assign) {
   // Upcall to LVecBase2.
   return invoke_extension<FLOATNAME(LVecBase2)>(_this).__setattr__(self, attr_name, assign);
+}
+
+/**
+ *
+ */
+INLINE_LINMATH FLOATNAME(LPoint2) Extension<FLOATNAME(LPoint2)>::
+__rmul__(FLOATTYPE scalar) const {
+  return *_this * scalar;
 }

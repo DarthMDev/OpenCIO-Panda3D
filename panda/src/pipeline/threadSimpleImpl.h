@@ -61,7 +61,7 @@ public:
   INLINE static Thread *get_current_thread();
   INLINE bool is_same_system_thread() const;
 
-  INLINE static void bind_thread(Thread *thread);
+  INLINE static Thread *bind_thread(Thread *thread);
   INLINE static bool is_threading_supported();
   static bool is_true_threads();
   INLINE static bool is_simple_threads();
@@ -76,6 +76,8 @@ public:
   INLINE double get_wake_time() const;
 
   INLINE static void write_status(std::ostream &out);
+
+  static bool get_context_switches(size_t &total, size_t &involuntary);
 
 private:
   static void st_begin_thread(void *data);
@@ -141,6 +143,9 @@ private:
 #ifdef WIN32
   DWORD _win32_system_thread_id;
 #endif
+
+  size_t _context_switches;
+  size_t _involuntary_context_switches;
 
   friend class ThreadSimpleManager;
 };

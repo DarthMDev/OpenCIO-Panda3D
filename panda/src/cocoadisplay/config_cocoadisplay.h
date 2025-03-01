@@ -20,6 +20,9 @@
 
 NotifyCategoryDecl(cocoadisplay, EXPCL_PANDA_COCOADISPLAY, EXPTP_PANDA_COCOADISPLAY);
 
+extern ConfigVariableBool cocoa_invert_wheel_x;
+extern ConfigVariableBool dpi_aware;
+
 extern EXPCL_PANDA_COCOADISPLAY void init_libcocoadisplay();
 
 #endif

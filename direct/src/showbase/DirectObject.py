@@ -44,14 +44,14 @@ class DirectObject:
     def addTask(self, *args, **kwargs):
         if not hasattr(self, "_taskList"):
             self._taskList = {}
-        kwargs['owner']=self
+        kwargs['owner'] = self
         task = taskMgr.add(*args, **kwargs)
         return task
 
     def doMethodLater(self, *args, **kwargs):
         if not hasattr(self, "_taskList"):
             self._taskList = {}
-        kwargs['owner']=self
+        kwargs['owner'] = self
         task = taskMgr.doMethodLater(*args, **kwargs)
         return task
 
@@ -92,6 +92,7 @@ class DirectObject:
         if hasattr(self, '_taskList'):
             tasks = [task.name for task in self._taskList.values()]
         if len(events) != 0 or len(tasks) != 0:
+            from direct.showbase.PythonUtil import getRepository
             estr = ('listening to events: %s' % events if len(events) != 0 else '')
             andStr = (' and ' if len(events) != 0 and len(tasks) != 0 else '')
             tstr = ('%srunning tasks: %s' % (andStr, tasks) if len(tasks) != 0 else '')

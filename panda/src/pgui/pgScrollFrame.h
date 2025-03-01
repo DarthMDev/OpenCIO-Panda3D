@@ -19,10 +19,7 @@
 #include "pgVirtualFrame.h"
 #include "pgSliderBarNotify.h"
 #include "pgSliderBar.h"
-
-#ifdef PHAVE_ATOMIC
-#include <atomic>
-#endif
+#include "patomic.h"
 
 /**
  * This is a special kind of frame that pretends to be much larger than it
@@ -59,20 +56,31 @@ PUBLISHED:
   INLINE const LVecBase4 &get_virtual_frame() const;
   INLINE bool has_virtual_frame() const;
   INLINE void clear_virtual_frame();
+  MAKE_PROPERTY2(virtual_frame,
+                 has_virtual_frame, get_virtual_frame,
+                 set_virtual_frame, clear_virtual_frame);
 
   INLINE void set_manage_pieces(bool manage_pieces);
   INLINE bool get_manage_pieces() const;
+  MAKE_PROPERTY(manage_pieces, get_manage_pieces, set_manage_pieces);
 
   INLINE void set_auto_hide(bool auto_hide);
   INLINE bool get_auto_hide() const;
+  MAKE_PROPERTY(auto_hide, get_auto_hide, set_auto_hide);
 
   INLINE void set_horizontal_slider(PGSliderBar *horizontal_slider);
   INLINE void clear_horizontal_slider();
   INLINE PGSliderBar *get_horizontal_slider() const;
+  MAKE_PROPERTY2(horizontal_slider,
+                 get_horizontal_slider, get_horizontal_slider,
+                 set_horizontal_slider, clear_horizontal_slider);
 
   INLINE void set_vertical_slider(PGSliderBar *vertical_slider);
   INLINE void clear_vertical_slider();
   INLINE PGSliderBar *get_vertical_slider() const;
+  MAKE_PROPERTY2(vertical_slider,
+                 get_vertical_slider, get_vertical_slider,
+                 set_vertical_slider, clear_vertical_slider);
 
   void remanage();
   INLINE void recompute();
@@ -96,7 +104,7 @@ private:
 private:
   bool _needs_remanage;
   bool _needs_recompute_clip;
-  std::atomic_flag _canvas_computed;
+  patomic_flag _canvas_computed;
 
   bool _has_virtual_frame;
   LVecBase4 _virtual_frame;

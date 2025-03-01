@@ -20,6 +20,9 @@
 #include "nodeCachedReferenceCount.h"
 #include "luse.h"
 #include "lightMutex.h"
+#include "patomic.h"
+#include "small_vector.h"
+#include "completionToken.h"
 
 // A handful of forward references.
 
@@ -28,6 +31,7 @@ class RenderBuffer;
 class GraphicsWindow;
 class NodePath;
 class GraphicsOutputBase;
+class ScreenshotRequest;
 
 class VertexBufferContext;
 class IndexBufferContext;
@@ -144,8 +148,9 @@ public:
   virtual PreparedGraphicsObjects *get_prepared_objects()=0;
 #endif
 
-  virtual TextureContext *prepare_texture(Texture *tex, int view)=0;
+  virtual TextureContext *prepare_texture(Texture *tex)=0;
   virtual bool update_texture(TextureContext *tc, bool force)=0;
+  virtual bool update_texture(TextureContext *tc, bool force, CompletionToken token)=0;
   virtual void release_texture(TextureContext *tc)=0;
   virtual void release_textures(const pvector<TextureContext *> &contexts)=0;
   virtual bool extract_texture_data(Texture *tex)=0;
@@ -220,7 +225,8 @@ public:
   virtual bool framebuffer_copy_to_texture
   (Texture *tex, int view, int z, const DisplayRegion *dr, const RenderBuffer &rb)=0;
   virtual bool framebuffer_copy_to_ram
-  (Texture *tex, int view, int z, const DisplayRegion *dr, const RenderBuffer &rb)=0;
+  (Texture *tex, int view, int z, const DisplayRegion *dr, const RenderBuffer &rb,
+   ScreenshotRequest *request = nullptr)=0;
 
   virtual CoordinateSystem get_internal_coordinate_system() const=0;
 
@@ -260,11 +266,11 @@ private:
   struct GSGList {
     LightMutex _lock;
 
-    typedef pvector<GraphicsStateGuardianBase *> GSGs;
+    typedef small_vector<GraphicsStateGuardianBase *> GSGs;
     GSGs _gsgs;
-    GraphicsStateGuardianBase *_default_gsg;
+    GraphicsStateGuardianBase *_default_gsg = nullptr;
   };
-  static AtomicAdjust::Pointer _gsg_list;
+  static patomic<GSGList *> _gsg_list;
 
 protected:
   static UpdateSeq _generated_shader_seq;

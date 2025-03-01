@@ -32,6 +32,7 @@ ComputeNode(const std::string &name) :
   _dispatcher(new ComputeNode::Dispatcher)
 {
   set_internal_bounds(new OmniBoundingVolume);
+  set_renderable();
 }
 
 /**
@@ -66,17 +67,6 @@ safe_to_combine() const {
 }
 
 /**
- * Returns true if there is some value to visiting this particular node during
- * the cull traversal for any camera, false otherwise.  This will be used to
- * optimize the result of get_net_draw_show_mask(), so that any subtrees that
- * contain only nodes for which is_renderable() is false need not be visited.
- */
-bool ComputeNode::
-is_renderable() const {
-  return true;
-}
-
-/**
  * Adds the node's contents to the CullResult we are building up during the
  * cull traversal, so that it will be drawn at render time.  For most nodes
  * other than GeomNodes, this is a do-nothing operation.
@@ -92,11 +82,10 @@ add_for_draw(CullTraverser *trav, CullTraverserData &data) {
   // OK, render this node.  Rendering this node means creating a
   // CullableObject for the Dispatcher.  We don't need to pass any Geoms,
   // however.
-  CullableObject *object =
-    new CullableObject(nullptr, data._state,
-                       data.get_internal_transform(trav));
-  object->set_draw_callback(_dispatcher);
-  trav->get_cull_handler()->record_object(object, trav);
+  CullableObject object(nullptr, data._state,
+                        data.get_internal_transform(trav));
+  object.set_draw_callback(_dispatcher);
+  trav->get_cull_handler()->record_object(std::move(object), trav);
 }
 
 /**
@@ -135,9 +124,8 @@ do_callback(CallbackData *cbdata) {
 
   CDReader cdata(_cycler);
 
-  Dispatches::const_iterator it;
-  for (it = cdata->_dispatches.begin(); it != cdata->_dispatches.end(); ++it) {
-    gsg->dispatch_compute(it->get_x(), it->get_y(), it->get_z());
+  for (const LVecBase3i &dispatch : cdata->_dispatches) {
+    gsg->dispatch_compute(dispatch[0], dispatch[1], dispatch[2]);
   }
 
   // No need to upcall; we don't have any geometry, after all.
@@ -204,9 +192,8 @@ void ComputeNode::Dispatcher::CData::
 write_datagram(BamWriter *manager, Datagram &dg) const {
   dg.add_uint16(_dispatches.size());
 
-  Dispatches::const_iterator it;
-  for (it = _dispatches.begin(); it != _dispatches.end(); ++it) {
-    generic_write_datagram(dg, *it);
+  for (const LVecBase3i &dispatch : _dispatches) {
+    generic_write_datagram(dg, dispatch);
   }
 }
 

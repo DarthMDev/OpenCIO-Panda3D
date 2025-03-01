@@ -71,6 +71,7 @@ RopeNode(const std::string &name) :
   PandaNode(name)
 {
   set_cull_callback();
+  set_renderable();
 }
 
 /**
@@ -163,17 +164,6 @@ cull_callback(CullTraverser *trav, CullTraverserData &data) {
 }
 
 /**
- * Returns true if there is some value to visiting this particular node during
- * the cull traversal for any camera, false otherwise.  This will be used to
- * optimize the result of get_net_draw_show_mask(), so that any subtrees that
- * contain only nodes for which is_renderable() is false need not be visited.
- */
-bool RopeNode::
-is_renderable() const {
-  return true;
-}
-
-/**
  *
  */
 void RopeNode::
@@ -243,9 +233,16 @@ get_format(bool support_normals) const {
        Geom::C_normal);
   }
   if (get_use_vertex_color()) {
-    array_format->add_column
-      (InternalName::get_color(), 1, Geom::NT_packed_dabc,
-       Geom::C_color);
+    if (vertex_colors_prefer_packed) {
+      array_format->add_column
+        (InternalName::get_color(), 1, Geom::NT_packed_dabc,
+         Geom::C_color);
+    }
+    else {
+      array_format->add_column
+        (InternalName::get_color(), 4, Geom::NT_uint8,
+         Geom::C_color);
+    }
   }
   if (get_uv_mode() != UV_none) {
     array_format->add_column
@@ -332,10 +329,8 @@ render_thread(CullTraverser *trav, CullTraverserData &data,
     state = state->add_attrib(ColorAttrib::make_vertex());
   }
 
-  CullableObject *object =
-    new CullableObject(geom, state,
-                       data.get_internal_transform(trav));
-  trav->get_cull_handler()->record_object(object, trav);
+  trav->get_cull_handler()->record_object(CullableObject(
+    std::move(geom), std::move(state), data.get_internal_transform(trav)), trav);
 }
 
 /**
@@ -378,10 +373,8 @@ render_tape(CullTraverser *trav, CullTraverserData &data,
     state = state->add_attrib(ColorAttrib::make_vertex());
   }
 
-  CullableObject *object =
-    new CullableObject(geom, state,
-                       data.get_internal_transform(trav));
-  trav->get_cull_handler()->record_object(object, trav);
+  trav->get_cull_handler()->record_object(CullableObject(
+    std::move(geom), std::move(state), data.get_internal_transform(trav)), trav);
 }
 
 /**
@@ -431,10 +424,8 @@ render_billboard(CullTraverser *trav, CullTraverserData &data,
     state = state->add_attrib(ColorAttrib::make_vertex());
   }
 
-  CullableObject *object =
-    new CullableObject(geom, state,
-                       data.get_internal_transform(trav));
-  trav->get_cull_handler()->record_object(object, trav);
+  trav->get_cull_handler()->record_object(CullableObject(
+    std::move(geom), std::move(state), data.get_internal_transform(trav)), trav);
 }
 
 /**
@@ -492,10 +483,8 @@ render_tube(CullTraverser *trav, CullTraverserData &data,
     state = state->add_attrib(ColorAttrib::make_vertex());
   }
 
-  CullableObject *object =
-    new CullableObject(geom, state,
-                       data.get_internal_transform(trav));
-  trav->get_cull_handler()->record_object(object, trav);
+  trav->get_cull_handler()->record_object(CullableObject(
+    std::move(geom), std::move(state), data.get_internal_transform(trav)), trav);
 }
 
 /**
@@ -526,8 +515,16 @@ get_connected_segments(RopeNode::CurveSegments &curve_segments,
     LPoint3 point;
     result->eval_segment_point(segment, 0.0f, point);
 
+    // We need a bit more relaxed threshold to prevent breaks between
+    // segments, see GitHub issue #1325.
+#ifdef STDFLOAT_DOUBLE
+    static const double threshold = 1.0e-8;
+#else
+    static const float threshold = 1.0e-4f;
+#endif
+
     if (curve_segment == nullptr ||
-        !point.almost_equal(last_point)) {
+        !point.almost_equal(last_point, threshold)) {
       // If the first point of this segment is different from the last point
       // of the previous segment, end the previous segment and begin a new
       // one.

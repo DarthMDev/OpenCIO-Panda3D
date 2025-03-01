@@ -13,6 +13,7 @@ set(P3DTOOLUTIL_HEADERS
   panda_getopt.h panda_getopt_long.h panda_getopt_impl.h
   pfstream.h pfstream.I pfstreamBuf.h
   preprocess_argv.h
+  small_vector.h small_vector.I
   string_utils.h string_utils.I
   stringDecoder.h stringDecoder.I
   textEncoder.h textEncoder.I
@@ -68,6 +69,8 @@ set(P3DTOOLUTIL_IGATEEXT
   globPattern_ext.h
   iostream_ext.cxx
   iostream_ext.h
+  pyenv_init.cxx
+  pyenv_init.h
   textEncoder_ext.cxx
   textEncoder_ext.h
 )

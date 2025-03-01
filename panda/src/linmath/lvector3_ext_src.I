@@ -16,12 +16,23 @@
  */
 INLINE_LINMATH std::string Extension<FLOATNAME(LVector3)>::
 __repr__() const {
-  std::ostringstream out;
-  out << "LVector3" << FLOATTOKEN << "("
-      << MAYBE_ZERO(_this->_v(0)) << ", "
-      << MAYBE_ZERO(_this->_v(1)) << ", "
-      << MAYBE_ZERO(_this->_v(2)) << ")";
-  return out.str();
+  char buf[128] = "LVector3";
+  char *p = buf + strlen(buf);
+  *(p++) = FLOATTOKEN;
+  *(p++) = '(';
+  FLOATTYPE_REPR(_this->_v(0), p);
+  p += strlen(p);
+  *(p++) = ',';
+  *(p++) = ' ';
+  FLOATTYPE_REPR(_this->_v(1), p);
+  p += strlen(p);
+  *(p++) = ',';
+  *(p++) = ' ';
+  FLOATTYPE_REPR(_this->_v(2), p);
+  p += strlen(p);
+  *(p++) = ')';
+  *p = '\0';
+  return std::string(buf, p - buf);
 }
 
 /**
@@ -79,4 +90,12 @@ INLINE_LINMATH int Extension<FLOATNAME(LVector3)>::
 __setattr__(PyObject *self, const std::string &attr_name, PyObject *assign) {
   // Upcall to LVecBase3.
   return invoke_extension<FLOATNAME(LVecBase3)>(_this).__setattr__(self, attr_name, assign);
+}
+
+/**
+ *
+ */
+INLINE_LINMATH FLOATNAME(LVector3) Extension<FLOATNAME(LVector3)>::
+__rmul__(FLOATTYPE scalar) const {
+  return *_this * scalar;
 }

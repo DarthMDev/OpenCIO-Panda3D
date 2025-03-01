@@ -19,6 +19,7 @@
 #include "typedReferenceCount.h"
 #include "pointerTo.h"
 #include "filterProperties.h"
+#include "luse.h"
 
 class AudioManager;
 
@@ -41,6 +42,10 @@ PUBLISHED:
   // loop_count: 0 = forever; 1 = play once; n = play n times.  inits to 1.
   virtual void set_loop_count(unsigned long loop_count=1) = 0;
   virtual unsigned long get_loop_count() const = 0;
+
+  // loop_start: 0 = beginning.  expressed in seconds.  inits to 0.
+  virtual void set_loop_start(PN_stdfloat loop_start=0) = 0;
+  virtual PN_stdfloat get_loop_start() const = 0;
 
   /**
    * Control time position within the sound, in seconds.  This is similar (in
@@ -84,17 +89,20 @@ PUBLISHED:
   // There is no set_name(), this is intentional.
   virtual const std::string& get_name() const = 0;
 
+  INLINE bool is_positional() const;
+
   // return: playing time in seconds.
   virtual PN_stdfloat length() const = 0;
 
   // Controls the position of this sound's emitter.  px, py and pz are the
   // emitter's position.  vx, vy and vz are the emitter's velocity in UNITS
   // PER SECOND (default: meters).
-  virtual void set_3d_attributes(PN_stdfloat px, PN_stdfloat py, PN_stdfloat pz,
-                                 PN_stdfloat vx, PN_stdfloat vy, PN_stdfloat vz);
-  virtual void get_3d_attributes(PN_stdfloat *px, PN_stdfloat *py, PN_stdfloat *pz,
-                                 PN_stdfloat *vx, PN_stdfloat *vy, PN_stdfloat *vz);
+  virtual void set_3d_attributes(PN_stdfloat px, PN_stdfloat py, PN_stdfloat pz, PN_stdfloat vx, PN_stdfloat vy, PN_stdfloat vz);
+  virtual void get_3d_attributes(PN_stdfloat *px, PN_stdfloat *py, PN_stdfloat *pz, PN_stdfloat *vx, PN_stdfloat *vy, PN_stdfloat *vz);
 
+  // Controls the direction of this sound emitter. Currently implemented only for OpenAL.
+  virtual void set_3d_direction(LVector3 d);
+  virtual LVector3 get_3d_direction() const;
 
   // Controls the distance (in units) that this sound begins to fall off.
   // Also affects the rate it falls off.  Default is 1.0 CloserFaster, <1.0
@@ -130,9 +138,12 @@ PUBLISHED:
   MAKE_PROPERTY(play_rate, get_play_rate, set_play_rate);
   MAKE_PROPERTY(active, get_active, set_active);
   MAKE_PROPERTY(name, get_name);
+  MAKE_PROPERTY(positional, is_positional);
 
 protected:
-  AudioSound();
+  AudioSound(bool positional);
+
+  const bool _positional = false;
 
   friend class AudioManager;
 

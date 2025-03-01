@@ -40,9 +40,12 @@ CollisionNode::
 CollisionNode(const std::string &name) :
   PandaNode(name),
   _from_collide_mask(get_default_collide_mask()),
-  _collider_sort(0)
+  _collider_sort(0),
+  _owner(nullptr),
+  _owner_callback(nullptr)
 {
   set_cull_callback();
+  set_renderable();
 
   // CollisionNodes are hidden by default.
   set_overall_hidden(true);
@@ -59,7 +62,9 @@ CollisionNode(const CollisionNode &copy) :
   PandaNode(copy),
   _from_collide_mask(copy._from_collide_mask),
   _collider_sort(copy._collider_sort),
-  _solids(copy._solids)
+  _solids(copy._solids),
+  _owner(nullptr),
+  _owner_callback(nullptr)
 {
 }
 
@@ -68,6 +73,10 @@ CollisionNode(const CollisionNode &copy) :
  */
 CollisionNode::
 ~CollisionNode() {
+  if (_owner_callback != nullptr) {
+    _owner_callback(_owner);
+    _owner_callback = nullptr;
+  }
 }
 
 /**
@@ -186,11 +195,8 @@ cull_callback(CullTraverser *trav, CullTraverserData &data) {
     CPT(CollisionSolid) solid = (*si).get_read_pointer();
     PT(PandaNode) node = solid->get_viz(trav, data, false);
     if (node != nullptr) {
-      CullTraverserData next_data(data, node);
-
       // We don't want to inherit the render state from above for these guys.
-      next_data._state = RenderState::make_empty();
-      trav->traverse(next_data);
+      trav->traverse_down(data, node, data._net_transform, RenderState::make_empty());
     }
   }
 
@@ -208,29 +214,14 @@ cull_callback(CullTraverser *trav, CullTraverserData &data) {
         CPT(CollisionSolid) solid = (*si).get_read_pointer();
         PT(PandaNode) node = solid->get_viz(trav, data, false);
         if (node != nullptr) {
-          CullTraverserData next_data(data, node);
-
-          next_data._net_transform =
-            next_data._net_transform->compose(transform);
-          next_data._state = get_last_pos_state();
-          trav->traverse(next_data);
+          trav->traverse_down(data, node,
+            data._net_transform->compose(transform), get_last_pos_state());
         }
       }
     }
   }
 
   // Now carry on to render our child nodes.
-  return true;
-}
-
-/**
- * Returns true if there is some value to visiting this particular node during
- * the cull traversal for any camera, false otherwise.  This will be used to
- * optimize the result of get_net_draw_show_mask(), so that any subtrees that
- * contain only nodes for which is_renderable() is false need not be visited.
- */
-bool CollisionNode::
-is_renderable() const {
   return true;
 }
 
@@ -266,6 +257,18 @@ output(std::ostream &out) const {
 void CollisionNode::
 set_from_collide_mask(CollideMask mask) {
   _from_collide_mask = mask;
+}
+
+/**
+ * Removes the owner that was previously set using set_owner().
+ */
+void CollisionNode::
+clear_owner() {
+  if (_owner_callback != nullptr) {
+    _owner_callback(_owner);
+  }
+  _owner = nullptr;
+  _owner_callback = nullptr;
 }
 
 /**

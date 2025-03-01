@@ -99,14 +99,15 @@ ShaderTerrainMesh::ShaderTerrainMesh() :
   _size(0),
   _chunk_size(32),
   _generate_patches(false),
-  _data_texture(nullptr),
+  _heightfield_tex(nullptr),
   _chunk_geom(nullptr),
+  _data_texture(nullptr),
   _current_view_index(0),
   _last_frame_count(-1),
   _target_triangle_width(10.0f),
-  _update_enabled(true),
-  _heightfield_tex(nullptr)
+  _update_enabled(true)
 {
+  set_renderable();
 }
 
 /**
@@ -440,14 +441,7 @@ void ShaderTerrainMesh::do_create_chunk_geom() {
 }
 
 /**
- * @copydoc PandaNode::is_renderable()
- */
-bool ShaderTerrainMesh::is_renderable() const {
-  return true;
-}
-
-/**
- * @copydoc PandaNode::is_renderable()
+ * @copydoc PandaNode::safe_to_flatten()
  */
 bool ShaderTerrainMesh::safe_to_flatten() const {
   return false;
@@ -550,8 +544,8 @@ void ShaderTerrainMesh::add_for_draw(CullTraverser *trav, CullTraverserData &dat
   state = state->set_attrib(current_shader_attrib, 10000);
 
   // Emit chunk
-  CullableObject *object = new CullableObject(_chunk_geom, std::move(state), std::move(modelview_transform));
-  trav->get_cull_handler()->record_object(object, trav);
+  trav->get_cull_handler()->record_object(CullableObject(
+    _chunk_geom, std::move(state), std::move(modelview_transform)), trav);
 
   // After rendering, increment the view index
   ++_current_view_index;

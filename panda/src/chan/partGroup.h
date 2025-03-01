@@ -19,7 +19,6 @@
 #include "typedWritableReferenceCount.h"
 #include "pointerTo.h"
 #include "namable.h"
-#include "typedef.h"
 #include "thread.h"
 #include "plist.h"
 #include "luse.h"
@@ -122,7 +121,7 @@ public:
   virtual int complete_pointers(TypedWritable **p_list,
                                 BamReader *manager);
 
-  static TypedWritable *make_PartGroup(const FactoryParams &params);
+  static TypedWritable *make_from_bam(const FactoryParams &params);
 
 protected:
   void fillin(DatagramIterator& scan, BamReader* manager);

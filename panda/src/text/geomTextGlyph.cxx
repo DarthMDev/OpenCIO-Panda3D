@@ -70,15 +70,6 @@ GeomTextGlyph(const Geom &copy, const TextGlyph *glyph) :
 /**
  *
  */
-void GeomTextGlyph::
-operator = (const GeomTextGlyph &copy) {
-  Geom::operator = (copy);
-  _glyphs = copy._glyphs;
-}
-
-/**
- *
- */
 GeomTextGlyph::
 ~GeomTextGlyph() {
 }
@@ -184,16 +175,15 @@ add_glyph(const TextGlyph *glyph) {
  */
 void GeomTextGlyph::
 register_with_read_factory() {
-  BamReader::get_factory()->register_factory(get_class_type(), make_GeomTextGlyph);
+  BamReader::get_factory()->register_factory(get_class_type(), make_from_bam);
 }
 
 /**
  * Factory method to generate a GeomTextGlyph object
  */
-TypedWritable* GeomTextGlyph::
-make_GeomTextGlyph(const FactoryParams &params) {
-  GeomTextGlyph *me = new GeomTextGlyph(nullptr,
-                                        nullptr);
+TypedWritable *GeomTextGlyph::
+make_from_bam(const FactoryParams &params) {
+  GeomTextGlyph *me = new GeomTextGlyph(nullptr, nullptr);
   DatagramIterator scan;
   BamReader *manager;
 

@@ -13,10 +13,13 @@
 
 #include "virtualFileHTTP.h"
 #include "virtualFileMountHTTP.h"
+#include "ramfile.h"
 #include "stringStream.h"
 #include "zStream.h"
 
-#ifdef HAVE_OPENSSL
+#include <iterator>
+
+#if defined(HAVE_OPENSSL) || defined(__EMSCRIPTEN__)
 
 using std::istream;
 using std::ostream;
@@ -36,8 +39,7 @@ VirtualFileHTTP(VirtualFileMountHTTP *mount, const Filename &local_filename,
   _implicit_pz_file(implicit_pz_file),
   _status_only(open_flags != 0)
 {
-  URLSpec url(_mount->get_root());
-  url.set_path(_mount->get_root().get_path() + _local_filename.c_str());
+  URLSpec url = get_url();
   _channel = _mount->get_channel();
   if (_status_only) {
     _channel->get_header(url);
@@ -84,6 +86,16 @@ get_filename() const {
       return string("/") + mount_point + string("/") + _local_filename.get_fullpath();
     }
   }
+}
+
+/**
+ * Returns the full URL of this file.
+ */
+URLSpec VirtualFileHTTP::
+get_url() const {
+  URLSpec url(_mount->get_root());
+  url.set_path(_mount->get_root().get_path() + _local_filename.c_str());
+  return url;
 }
 
 /**
@@ -137,7 +149,50 @@ open_read_file(bool auto_unwrap) const {
     return nullptr;
   }
 
+  strstream->seekg(0);
+
   return return_file(strstream, auto_unwrap);
+}
+
+/**
+ * Fills up the indicated string with the contents of the file, if it is a
+ * regular file.  Returns true on success, false otherwise.
+ */
+bool VirtualFileHTTP::
+read_file(string &result, bool auto_unwrap) const {
+  result = string();
+
+  if (_status_only) {
+    return false;
+  }
+
+  Ramfile ramfile;
+  if (!_channel->download_to_ram(&ramfile, false)) {
+    return false;
+  }
+
+  result = std::move(ramfile._data);
+  return true;
+}
+
+/**
+ * Fills up the indicated pvector with the contents of the file, if it is a
+ * regular file.  Returns true on success, false otherwise.
+ */
+bool VirtualFileHTTP::
+read_file(vector_uchar &result, bool auto_unwrap) const {
+  if (_status_only) {
+    return false;
+  }
+
+  Ramfile ramfile;
+  if (!_channel->download_to_ram(&ramfile, false)) {
+    return false;
+  }
+
+  const string &data = ramfile.get_data();
+  std::copy(data.begin(), data.end(), std::back_inserter(result));
+  return true;
 }
 
 /**

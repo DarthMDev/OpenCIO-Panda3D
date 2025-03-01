@@ -66,11 +66,11 @@ GeomVertexData(const std::string &name,
                const GeomVertexFormat *format,
                GeomVertexData::UsageHint usage_hint) :
   _name(name),
+  _cycler(GeomVertexData::CData(format, usage_hint)),
   _char_pcollector(PStatCollector(_animation_pcollector, name)),
   _skinning_pcollector(_char_pcollector, "Skinning"),
   _morphs_pcollector(_char_pcollector, "Morphs"),
-  _blends_pcollector(_char_pcollector, "Calc blends"),
-  _cycler(GeomVertexData::CData(format, usage_hint))
+  _blends_pcollector(_char_pcollector, "Calc blends")
 {
   nassertv(format->is_registered());
 }
@@ -130,33 +130,6 @@ GeomVertexData(const GeomVertexData &copy,
     }
 
     // It's important that we *not* copy the animated_vertices pointer.
-    cdata->_animated_vertices = nullptr;
-    cdata->_animated_vertices_modified = UpdateSeq();
-  }
-  CLOSE_ITERATE_ALL_STAGES(_cycler);
-}
-
-/**
- * The copy assignment operator is not pipeline-safe.  This will completely
- * obliterate all stages of the pipeline, so don't do it for a GeomVertexData
- * that is actively being used for rendering.
- */
-void GeomVertexData::
-operator = (const GeomVertexData &copy) {
-  CopyOnWriteObject::operator = (copy);
-
-  clear_cache();
-
-  _name = copy._name;
-  _cycler = copy._cycler;
-  _char_pcollector = copy._char_pcollector;
-  _skinning_pcollector = copy._skinning_pcollector;
-  _morphs_pcollector = copy._morphs_pcollector;
-  _blends_pcollector = copy._blends_pcollector;
-
-  OPEN_ITERATE_ALL_STAGES(_cycler) {
-    CDStageWriter cdata(_cycler, pipeline_stage);
-    cdata->_modified = Geom::get_next_modified();
     cdata->_animated_vertices = nullptr;
     cdata->_animated_vertices_modified = UpdateSeq();
   }
@@ -1268,7 +1241,9 @@ output(ostream &out) const {
   if (!get_name().empty()) {
     out << get_name() << " ";
   }
-  out << get_num_rows() << " rows: " << *get_format();
+  const GeomVertexFormat *format = get_format();
+  nassertv(format != nullptr);
+  out << get_num_rows() << " rows: " << *format;
 }
 
 /**
@@ -1279,8 +1254,15 @@ write(ostream &out, int indent_level) const {
   if (!get_name().empty()) {
     indent(out, indent_level) << get_name() << "\n";
   }
-  get_format()->write_with_data(out, indent_level + 2, this);
-  CPT(TransformBlendTable) table = get_transform_blend_table();
+  CPT(TransformBlendTable) table;
+  const GeomVertexFormat *format = nullptr;
+  {
+    CDReader cdata(_cycler);
+    format = cdata->_format;
+    table = cdata->_transform_blend_table.get_read_pointer();
+  }
+  nassertv(format != nullptr);
+  format->write_with_data(out, indent_level + 2, this);
   if (table != nullptr) {
     indent(out, indent_level)
       << "Transform blend table:\n";
